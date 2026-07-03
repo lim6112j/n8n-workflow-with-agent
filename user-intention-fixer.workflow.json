@@ -1,0 +1,352 @@
+{
+  "name": "user intention fixer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "user-intention-fixer",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "Webhook_IntentionInput",
+      "name": "Intention Input",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -860,
+        120
+      ],
+      "webhookId": "19096EB4-3CF7-4256-BA2E-BBAA4BCC4C89"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "prompt",
+              "name": "prompt",
+              "value": "={{$json.body?.prompt ?? $json.query?.prompt ?? ''}}",
+              "type": "string"
+            },
+            {
+              "id": "last_answer",
+              "name": "last_answer",
+              "value": "={{$json.body?.last_answer ?? $json.query?.last_answer ?? ''}}",
+              "type": "string"
+            },
+            {
+              "id": "turn_count",
+              "name": "turn_count",
+              "value": "={{Number($json.body?.turn_count ?? $json.query?.turn_count ?? 0)}}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "Set_NormalizeInput",
+      "name": "Normalize Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -620,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prompt = ($json.prompt ?? '').toString().trim();\nconst lastAnswer = ($json.last_answer ?? '').toString().trim();\nconst turnCount = Number($json.turn_count ?? 0);\nconst text = (lastAnswer || prompt).trim();\n\nconst tooShort = text.length < 20;\nconst tooVague = /^(help|anything|something|idk|i don't know|dont know|not sure|whatever|you decide)\\b/i.test(text);\nconst hasAction = /(build|create|send|generate|fix|analy[sz]e|summari[sz]e|extract|automate|integrate|sync|classify|draft|plan|refactor|deploy|convert|transform)/i.test(text);\nconst hasOutputHint = /(json|csv|email|report|dashboard|summary|table|markdown|ticket|message|file|api)/i.test(text);\n\nconst ruleClear = !tooShort && !tooVague && hasAction && hasOutputHint;\n\nif (ruleClear) {\n  return [{\n    json: {\n      status: 'clear',\n      source: 'rules',\n      turn_count: turnCount,\n      original_prompt: prompt,\n      final_intent: text,\n      done: true\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    status: 'needs_ai_fallback',\n    source: 'rules',\n    turn_count: turnCount,\n    original_prompt: prompt,\n    current_text: text,\n    rule_signals: { tooShort, tooVague, hasAction, hasOutputHint },\n    done: false\n  }\n}];"
+      },
+      "id": "Code_RuleGate",
+      "name": "Rule Intention Gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -380,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "rules_status_clear",
+              "leftValue": "={{$json.status}}",
+              "rightValue": "clear",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "IF_RulesClear",
+      "name": "Rules say clear?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -150,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ai_status_clear",
+              "leftValue": "={{$json.status}}",
+              "rightValue": "clear",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "IF_AIClear",
+      "name": "AI says clear?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        320,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const intent = ($json.final_intent ?? '').toString();\n\nreturn [{\n  json: {\n    status: 'ready_for_processing',\n    source: $json.source ?? 'unknown',\n    intent,\n    processing_payload: {\n      prompt: intent\n    },\n    message: 'Intention is clear. Proceeding to next processing node.'\n  }\n}];"
+      },
+      "id": "Code_Proceed",
+      "name": "Proceed Next Node",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {}
+      },
+      "id": "Respond_Clarify",
+      "name": "Ask Clarification",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        560,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {}
+      },
+      "id": "Respond_Proceed",
+      "name": "Return Processing Payload",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        800,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "model": "anthropic/claude-haiku-4.5",
+        "options": {
+          "temperature": 0
+        }
+      },
+      "id": "LM_OpenRouter",
+      "name": "OpenRouter Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        120,
+        20
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "CrCtPveFpgBQ5Pir",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ `Original prompt: ${$json.original_prompt}\\nLatest answer: ${$json.current_text}\\nTurn count: ${$json.turn_count}` }}",
+        "options": {
+          "systemMessage": "You clarify user intention for workflow automation. Return strict JSON only with keys: clear_intent (boolean), refined_intent (string), clarification_question (string), missing_fields (array of strings). Mark clear_intent=true only when goal, input source, and expected output are all clear.",
+          "maxIterations": 3
+        }
+      },
+      "id": "AI_Agent_Clarifier",
+      "name": "AI Clarifier Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        110,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const originalPrompt = ($json.original_prompt ?? '').toString().trim();\nconst currentText = ($json.current_text ?? '').toString().trim();\nconst turnCount = Number($json.turn_count ?? 0);\n\nconst raw = ($json.output ?? $json.text ?? '').toString().trim();\nlet parsed;\ntry {\n  const cleaned = raw.replace(/^```json\\s*/i, '').replace(/```$/i, '').trim();\n  parsed = JSON.parse(cleaned);\n} catch (error) {\n  return [{\n    json: {\n      status: 'need_clarification',\n      source: 'ai-fallback-parse-error',\n      turn_count: turnCount + 1,\n      original_prompt: originalPrompt,\n      current_text: currentText,\n      question: 'Please clarify your exact goal, input source, and desired output format.',\n      hint: `AI response was not valid JSON: ${raw.slice(0, 200)}`,\n      done: false\n    }\n  }];\n}\n\nif (parsed?.clear_intent === true) {\n  return [{\n    json: {\n      status: 'clear',\n      source: 'ai-fallback',\n      turn_count: turnCount,\n      original_prompt: originalPrompt,\n      final_intent: (parsed.refined_intent || currentText || originalPrompt).toString().trim(),\n      done: true\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    status: 'need_clarification',\n    source: 'ai-fallback',\n    turn_count: turnCount + 1,\n    original_prompt: originalPrompt,\n    current_text: currentText,\n    question: (parsed?.clarification_question || 'Could you clarify your goal, input source, and expected output?').toString(),\n    missing_fields: Array.isArray(parsed?.missing_fields) ? parsed.missing_fields : [],\n    done: false\n  }\n}];"
+      },
+      "id": "Code_ParseAIClarifier",
+      "name": "Parse AI Clarifier",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        260
+      ]
+    }
+  ],
+  "connections": {
+    "Intention Input": {
+      "main": [
+        [
+          {
+            "node": "Normalize Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Input": {
+      "main": [
+        [
+          {
+            "node": "Rule Intention Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rule Intention Gate": {
+      "main": [
+        [
+          {
+            "node": "Rules say clear?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rules say clear?": {
+      "main": [
+        [
+          {
+            "node": "Proceed Next Node",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Clarifier Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI says clear?": {
+      "main": [
+        [
+          {
+            "node": "Proceed Next Node",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ask Clarification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Proceed Next Node": {
+      "main": [
+        [
+          {
+            "node": "Return Processing Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Clarifier Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Clarifier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Clarifier Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Clarifier": {
+      "main": [
+        [
+          {
+            "node": "AI says clear?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": false
+}
