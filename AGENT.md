@@ -38,6 +38,46 @@ curl -sS "$N8N_API_BASE/workflows?limit=1" \
 - Always authenticate via **n8n Credentials** configured for OpenRouter.
 - Do not embed API keys in JSON/code nodes.
 - Prefer a named credential reference in the node instead of raw headers.
+- Use node type `@n8n/n8n-nodes-langchain.lmChatOpenRouter` for the model node.
+- In workflow JSON, reference OpenRouter credentials with key `openRouterApi`.
+- Pair the model node with `@n8n/n8n-nodes-langchain.agent` and connect it through `ai_languageModel`.
+
+### OpenRouter node with credential (example)
+Use this minimal node structure (replace credential `id`/`name` with your n8n credential):
+
+```json
+{
+  "name": "OpenRouter Model",
+  "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+  "typeVersion": 1,
+  "position": [760, 240],
+  "parameters": {
+    "model": "openai/gpt-4.1-mini"
+  },
+  "credentials": {
+    "openRouterApi": {
+      "id": "YOUR_CREDENTIAL_ID",
+      "name": "OpenRouter account"
+    }
+  }
+}
+```
+
+Connect it to the AI Agent node under `connections`:
+
+```json
+"OpenRouter Model": {
+  "ai_languageModel": [
+    [
+      {
+        "node": "AI Clarifier Agent",
+        "type": "ai_languageModel",
+        "index": 0
+      }
+    ]
+  ]
+}
+```
 
 ## Minimal workflow JSON shape
 Each workflow should include:
@@ -79,7 +119,7 @@ curl -sS "$N8N_API_BASE/workflows/<workflowId>" \
 
 ### Update workflow
 ```bash
-curl -sS -X PATCH "$N8N_API_BASE/workflows/<workflowId>" \
+curl -sS -X PUT "$N8N_API_BASE/workflows/<workflowId>" \
   -H "X-N8N-API-KEY: $N8N_API_KEY" \
   -H "Content-Type: application/json" \
   --data-binary @workflow-update.json
@@ -88,16 +128,12 @@ curl -sS -X PATCH "$N8N_API_BASE/workflows/<workflowId>" \
 ### Activate / deactivate workflow
 ```bash
 # activate
-curl -sS -X PATCH "$N8N_API_BASE/workflows/<workflowId>" \
-  -H "X-N8N-API-KEY: $N8N_API_KEY" \
-  -H "Content-Type: application/json" \
-  --data '{"active":true}'
+curl -sS -X POST "$N8N_API_BASE/workflows/<workflowId>/activate" \
+  -H "X-N8N-API-KEY: $N8N_API_KEY"
 
 # deactivate
-curl -sS -X PATCH "$N8N_API_BASE/workflows/<workflowId>" \
-  -H "X-N8N-API-KEY: $N8N_API_KEY" \
-  -H "Content-Type: application/json" \
-  --data '{"active":false}'
+curl -sS -X POST "$N8N_API_BASE/workflows/<workflowId>/deactivate" \
+  -H "X-N8N-API-KEY: $N8N_API_KEY"
 ```
 
 ### Delete workflow
