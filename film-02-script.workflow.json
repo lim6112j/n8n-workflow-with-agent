@@ -1,0 +1,282 @@
+{
+  "name": "AI Film 02 — Script & Storyboard",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "film-run-script",
+        "formTitle": "AI Film — Generate Script",
+        "formDescription": "Turn a project's story into script.json via OpenRouter.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Project Slug",
+              "fieldName": "project_slug",
+              "placeholder": "the-lighthouse-keeper",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Extra Direction (optional)",
+              "fieldName": "extra_direction",
+              "fieldType": "textarea",
+              "placeholder": "e.g. keep it under 8 shots, melancholic tone",
+              "requiredField": false
+            }
+          ]
+        },
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "Form_Script",
+      "name": "Script Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.4,
+      "position": [
+        -1400,
+        300
+      ],
+      "webhookId": "13422427-6C08-4EF4-B3C9-A7309C2DD8AD"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst slug = ($json.project_slug ?? $json['Project Slug'] ?? '').toString().trim().toLowerCase().replace(/[^a-z0-9-]/g, '');\nif (!slug) throw new Error('Project Slug is required.');\nconst extra = ($json.extra_direction ?? $json['Extra Direction (optional)'] ?? '').toString().trim();\nreturn [{ json: { slug, payloadB64: Buffer.from(JSON.stringify({ slug, extra_direction: extra })).toString('base64') } }];\n"
+      },
+      "id": "Code_BuildRequest",
+      "name": "Build Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1140,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "command": "python3 - <<'PY'\nimport base64, json, os, sys\nreq = json.loads(base64.b64decode(\"{{ $json.payloadB64 }}\").decode(\"utf-8\"))\nroot = \"/home/node/files/films/\" + req[\"slug\"]\npfile = os.path.join(root, \"project.json\")\nif not os.path.exists(pfile):\n    print(json.dumps({\"ok\": False, \"error\": \"No project found at \" + root + \". Create it first via the Project Setup form.\"}))\n    sys.exit(1)\nproj = json.load(open(pfile))\nstory = (proj.get(\"story\") or \"\").strip()\nif not story:\n    print(json.dumps({\"ok\": False, \"error\": \"project.json has no story.\"}))\n    sys.exit(1)\nprint(json.dumps({\"ok\": True, \"slug\": req[\"slug\"], \"title\": proj.get(\"title\", \"Untitled\"),\n                  \"story\": story, \"extra_direction\": req.get(\"extra_direction\", \"\")}, ensure_ascii=False))\nPY"
+      },
+      "id": "Cmd_LoadStory",
+      "name": "Load Story",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst res = JSON.parse(($json.stdout ?? '').toString().trim());\nif (!res.ok) throw new Error(res.error || 'Failed to load project story.');\nconst story = (res.story ?? '').toString().trim();\nconst extra = (res.extra_direction ?? '').toString().trim();\nconst title = (res.title ?? 'Untitled').toString();\nconst VOICES = ['alloy', 'ash', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer'];\n\nlet prompt = [\n'You are a film script writer and storyboard artist. Convert the story below into a shot-by-shot script.',\n'',\n'RULES:',\n'- Return ONLY strict JSON. No markdown fences, no commentary.',\n'- 4 to 12 shots total, grouped into 1 to 4 scenes.',\n'- Each character: id (snake_case), name, visual_description (detailed, stable wording for image generation), reference_images (empty array), voice (one of: ' + VOICES.join(', ') + '), tts_model (\"gpt-4o-mini-tts\" or \"tts-1\"), tts_instructions (short delivery direction).',\n'- Each shot: id (\"shot_001\" style, sequential across scenes), image_prompt (self-contained English description of ONE 16:9 frame; refer to characters by name), characters (array of character ids present, may be empty for scenery), narration (string or null) OR dialogue (array of {character, text}), duration_hint_sec (3 to 12), motion (\"auto\").',\n'- A shot has EITHER narration or dialogue, never both. Lines must be under 240 characters each.',\n'- Top level also: title, style_notes (visual style for image generation), narrator_voice (from the voice list), narrator_instructions.',\n'',\n'SCHEMA:',\n'{\"title\":string,\"slug\":string,\"style_notes\":string,\"narrator_voice\":string,\"narrator_instructions\":string,\"characters\":[{\"id\":string,\"name\":string,\"visual_description\":string,\"reference_images\":[],\"voice\":string,\"tts_model\":string,\"tts_instructions\":string}],\"scenes\":[{\"id\":string,\"title\":string,\"shots\":[{\"id\":string,\"image_prompt\":string,\"characters\":[string],\"narration\":string|null,\"dialogue\":[{\"character\":string,\"text\":string}],\"duration_hint_sec\":number,\"motion\":\"auto\"}]}]}',\n'',\n'Set the top-level \"slug\" exactly to: ' + res.slug,\n'STORY TITLE: ' + title,\n'STORY:',\nstory,\n].join('\\n');\nif (extra) prompt += '\\n\\nEXTRA DIRECTION FROM THE AUTHOR (follow it):\\n' + extra;\n\nreturn [{ json: { slug: res.slug, title, prompt } }];\n"
+      },
+      "id": "Code_BuildPrompt",
+      "name": "Build Script Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -620,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.prompt }}",
+        "options": {
+          "systemMessage": "You are an expert film script writer and storyboard artist. Always answer with a single strict JSON document and nothing else — no markdown fences, no commentary.",
+          "maxIterations": 2
+        }
+      },
+      "id": "Agent_Script",
+      "name": "Script Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        -360,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "model": "anthropic/claude-haiku-4.5",
+        "options": {
+          "temperature": 0.2,
+          "maxTokens": 8000
+        }
+      },
+      "id": "LM_OpenRouter",
+      "name": "OpenRouter Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -580,
+        120
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "CrCtPveFpgBQ5Pir",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst slug = ($json.slug ?? '').toString();\nconst raw = ($json.output ?? '').toString().trim();\nconst cleaned = raw.replace(/^```(?:json)?\\s*/i, '').replace(/```\\s*$/, '').trim();\nlet s;\ntry { s = JSON.parse(cleaned); } catch (e) {\n  throw new Error('Script output was not valid JSON: ' + raw.slice(0, 300));\n}\nconst VOICES = new Set(['alloy', 'ash', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer']);\nconst charsIn = Array.isArray(s.characters) ? s.characters : [];\nconst charMap = {};\ncharsIn.forEach((c, i) => {\n  const id = (c.id ?? 'char_' + (i + 1)).toString().toLowerCase().replace(/[^a-z0-9_]/g, '_') || ('char_' + (i + 1));\n  charMap[id] = {\n    id,\n    name: (c.name ?? id).toString(),\n    visual_description: (c.visual_description ?? '').toString(),\n    reference_images: [],\n    voice: VOICES.has(c.voice) ? c.voice : 'coral',\n    tts_model: c.tts_model === 'tts-1' ? 'tts-1' : 'gpt-4o-mini-tts',\n    tts_instructions: (c.tts_instructions ?? '').toString().slice(0, 500),\n  };\n});\nconst scenes = [];\nlet n = 0;\nfor (const sc of (Array.isArray(s.scenes) ? s.scenes : [])) {\n  const shots = [];\n  for (const sh of (Array.isArray(sc.shots) ? sc.shots : [])) {\n    const imagePrompt = (sh.image_prompt ?? '').toString().trim();\n    if (!imagePrompt) continue;\n    const narration = sh.narration ? sh.narration.toString().trim() : null;\n    let dialogue = Array.isArray(sh.dialogue)\n      ? sh.dialogue.map((d) => ({\n          character: (d.character ?? '').toString().toLowerCase().replace(/[^a-z0-9_]/g, '_'),\n          text: (d.text ?? '').toString().trim(),\n        })).filter((d) => d.text)\n      : [];\n    n += 1;\n    const dur = Number(sh.duration_hint_sec);\n    shots.push({\n      id: 'shot_' + String(n).padStart(3, '0'),\n      image_prompt: imagePrompt,\n      characters: Array.isArray(sh.characters) ? sh.characters.map((x) => x.toString().toLowerCase().replace(/[^a-z0-9_]/g, '_')) : [],\n      narration: narration || null,\n      dialogue,\n      duration_hint_sec: Math.min(15, Math.max(2, Number.isFinite(dur) && dur > 0 ? dur : 5)),\n      motion: ['zoom_in', 'zoom_out', 'pan_left', 'pan_right'].includes(sh.motion) ? sh.motion : 'auto',\n    });\n  }\n  if (shots.length) scenes.push({ id: 'scene_' + (scenes.length + 1), title: (sc.title ?? '').toString(), shots });\n}\nif (!scenes.length) throw new Error('Parsed script contains no usable shots.');\nconst script = {\n  title: (s.title ?? 'Untitled').toString(),\n  slug,\n  language: 'en',\n  aspect: '16:9',\n  fps: 25,\n  resolution: '1920x1080',\n  style_notes: (s.style_notes ?? '').toString(),\n  narrator_voice: VOICES.has(s.narrator_voice) ? s.narrator_voice : 'fable',\n  narrator_instructions: (s.narrator_instructions ?? '').toString(),\n  characters: Object.values(charMap),\n  scenes,\n};\nreturn [{ json: {\n  slug,\n  shotCount: n,\n  scriptB64: Buffer.from(JSON.stringify(script, null, 2)).toString('base64'),\n}}];\n"
+      },
+      "id": "Code_Parse",
+      "name": "Parse Script JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "command": "python3 - <<'PY'\nimport base64, datetime, json, os, sys\ndata = json.loads(base64.b64decode(\"{{ $json.scriptB64 }}\").decode(\"utf-8\"))\nslug = \"{{ $json.slug }}\"\nroot = \"/home/node/files/films/\" + slug\nif not os.path.isdir(root):\n    print(json.dumps({\"ok\": False, \"error\": \"project dir missing: \" + root}))\n    sys.exit(1)\nwith open(os.path.join(root, \"script.json\"), \"w\") as fh:\n    json.dump(data, fh, indent=2, ensure_ascii=False)\npf = os.path.join(root, \"project.json\")\nproj = json.load(open(pf)) if os.path.exists(pf) else {}\nnow = datetime.datetime.utcnow().isoformat() + \"Z\"\nproj.update({\"slug\": slug, \"status\": \"script_ready\", \"updated_at\": now})\nproj.setdefault(\"counts\", {})[\"shots\"] = sum(len(s[\"shots\"]) for s in data[\"scenes\"])\nproj[\"counts\"][\"characters\"] = len(data[\"characters\"])\nproj.setdefault(\"stages\", {})[\"script\"] = {\"status\": \"done\", \"done_at\": now}\nwith open(pf, \"w\") as fh:\n    json.dump(proj, fh, indent=2, ensure_ascii=False)\nprint(json.dumps({\"ok\": True, \"shots\": proj[\"counts\"][\"shots\"], \"characters\": proj[\"counts\"][\"characters\"]}))\nPY"
+      },
+      "id": "Cmd_SaveScript",
+      "name": "Save Script",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        160,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "slug",
+              "name": "slug",
+              "value": "={{ $('Parse Script JSON').first().json.slug }}",
+              "type": "string"
+            },
+            {
+              "id": "shotCount",
+              "name": "shotCount",
+              "value": "={{ $('Parse Script JSON').first().json.shotCount }}",
+              "type": "number"
+            },
+            {
+              "id": "scriptPath",
+              "name": "scriptPath",
+              "value": "=/home/node/files/films/{{ $('Parse Script JSON').first().json.slug }}/script.json",
+              "type": "string"
+            },
+            {
+              "id": "nextStep",
+              "name": "nextStep",
+              "value": "=Review and edit script.json on disk (voices, prompts, dialogue). Then generate images at http://localhost:5678/form/film-gen-shots with this slug.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "Set_Ready",
+      "name": "Script Ready",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        420,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Script Form": {
+      "main": [
+        [
+          {
+            "node": "Build Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Request": {
+      "main": [
+        [
+          {
+            "node": "Load Story",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Story": {
+      "main": [
+        [
+          {
+            "node": "Build Script Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Script Prompt": {
+      "main": [
+        [
+          {
+            "node": "Script Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Script Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse Script JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Script JSON": {
+      "main": [
+        [
+          {
+            "node": "Save Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Script": {
+      "main": [
+        [
+          {
+            "node": "Script Ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Script Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": false
+}

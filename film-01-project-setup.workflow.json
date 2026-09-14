@@ -1,0 +1,179 @@
+{
+  "name": "AI Film 01 — Project Setup",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "film-project-setup",
+        "formTitle": "AI Film — Create Project",
+        "formDescription": "Start a new short-film project: your title, your story, and character reference images.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Film Title",
+              "fieldName": "film_title",
+              "placeholder": "The Lighthouse Keeper",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Story",
+              "fieldName": "story",
+              "fieldType": "textarea",
+              "placeholder": "Write your story here",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Reference Images",
+              "fieldName": "ref_images",
+              "fieldType": "file",
+              "multipleFiles": true,
+              "acceptFileTypes": ".jpg,.jpeg,.png,.webp",
+              "requiredField": true
+            }
+          ]
+        },
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "Form_Setup",
+      "name": "Project Setup Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.4,
+      "position": [
+        -1400,
+        300
+      ],
+      "webhookId": "4C87A323-5B30-4EDB-ACF7-CEAB961651F0"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst title = ($json.film_title ?? $json['Film Title'] ?? '').toString().trim();\nconst story = ($json.story ?? $json['Story'] ?? '').toString().trim();\nif (!title) throw new Error('Film Title is required.');\nif (!story || story.length < 20) throw new Error('Story is required (at least 20 characters).');\nconst slug = (title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60)) || 'untitled-film';\n\n// Collect uploaded reference images from binary properties (names vary by n8n version)\nconst bin = (items[0] && items[0].binary) ? items[0].binary : {};\nconst props = Object.keys(bin).sort();\nif (!props.length) throw new Error('No reference images were uploaded.');\nconst refs = [];\nfor (const prop of props) {\n  const meta = bin[prop] ?? {};\n  const filename = (meta.filename ?? 'upload.jpg').toString();\n  const extRaw = (filename.split('.').pop() ?? 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');\n  const ext = ['jpg', 'jpeg', 'png', 'webp'].includes(extRaw) ? extRaw : 'jpg';\n  const buf = await this.helpers.getBinaryDataBuffer(0, prop);\n  if (!buf || !buf.length) continue;\n  refs.push({ filename, mimetype: meta.mimeType ?? 'image/jpeg', ext, b64: buf.toString('base64') });\n}\nif (!refs.length) throw new Error('Reference image uploads could not be read.');\nif (refs.length > 6) throw new Error('Please upload at most 6 reference images.');\n\nconst payload = { title, story, slug, refs };\nreturn [{ json: {\n  title, slug, refCount: refs.length,\n  payloadB64: Buffer.from(JSON.stringify(payload)).toString('base64'),\n}}];\n"
+      },
+      "id": "Code_Normalize",
+      "name": "Normalize Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1140,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "command": "python3 - <<'PY'\nimport base64, datetime, json, os\npayload = json.loads(base64.b64decode(\"{{ $json.payloadB64 }}\").decode(\"utf-8\"))\nslug = payload[\"slug\"]\nroot = \"/home/node/files/films/\" + slug\nfor sub in [\"\", \"refs\", \"refs/original\", \"shots\", \"audio\", \"audio/lines\", \"render\", \"music\", \"logs\"]:\n    os.makedirs(os.path.join(root, sub) if sub else root, exist_ok=True)\nfor i, ref in enumerate(payload[\"refs\"], 1):\n    p = os.path.join(root, \"refs\", \"original\", \"ref_%02d.%s\" % (i, ref[\"ext\"]))\n    with open(p, \"wb\") as fh:\n        fh.write(base64.b64decode(ref[\"b64\"]))\nnow = datetime.datetime.utcnow().isoformat() + \"Z\"\nproj = {\"slug\": slug, \"title\": payload[\"title\"], \"story\": payload[\"story\"],\n        \"created_at\": now, \"updated_at\": now, \"status\": \"created\", \"stages\": {},\n        \"counts\": {\"refs\": len(payload[\"refs\"])}, \"notes\": \"\"}\nwith open(os.path.join(root, \"project.json\"), \"w\") as fh:\n    json.dump(proj, fh, indent=2, ensure_ascii=False)\nprint(json.dumps({\"ok\": True, \"root\": root, \"refs\": len(payload[\"refs\"])}))\nPY"
+      },
+      "id": "Cmd_WriteProject",
+      "name": "Write Project Files",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "command": "cd \"/home/node/files/films/{{ $('Normalize Input').first().json.slug }}/refs\" || exit 1\ni=1\nfor f in original/*; do\n  ffmpeg -y -loglevel error -i \"$f\" -vf \"scale='min(1024,iw)':-2\" -q:v 4 \"ref_$(printf '%02d' $i).jpg\" || echo \"normalize failed: $f\"\n  i=$((i+1))\ndone\nls -la . | tail -n +2"
+      },
+      "id": "Cmd_NormalizeRefs",
+      "name": "Normalize Refs (FFmpeg)",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -620,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "slug",
+              "name": "slug",
+              "value": "={{ $('Normalize Input').first().json.slug }}",
+              "type": "string"
+            },
+            {
+              "id": "refCount",
+              "name": "refCount",
+              "value": "={{ $('Normalize Input').first().json.refCount }}",
+              "type": "number"
+            },
+            {
+              "id": "projectPath",
+              "name": "projectPath",
+              "value": "=/home/node/files/films/{{ $('Normalize Input').first().json.slug }}",
+              "type": "string"
+            },
+            {
+              "id": "nextStep",
+              "name": "nextStep",
+              "value": "=Project created. Next: open http://localhost:5678/form/film-run-script and enter this slug to generate the script.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "Set_Created",
+      "name": "Project Created",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -360,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Project Setup Form": {
+      "main": [
+        [
+          {
+            "node": "Normalize Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Input": {
+      "main": [
+        [
+          {
+            "node": "Write Project Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Project Files": {
+      "main": [
+        [
+          {
+            "node": "Normalize Refs (FFmpeg)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Refs (FFmpeg)": {
+      "main": [
+        [
+          {
+            "node": "Project Created",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": false
+}
