@@ -1,0 +1,317 @@
+{
+  "name": "extract captions",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "Schedule_WatchTick",
+      "name": "Watch Tick",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1240,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "command": "WATCH_DIR=\"${CAPTION_WATCH_DIR:-/home/node/files/inbox}\"\nOUT_DIR=\"${CAPTION_OUTPUT_DIR:-/home/node/files/captions}\"\nWORK_DIR=\"${CAPTION_WORK_DIR:-/home/node/files/work}\"\nWHISPER_MODEL=\"${WHISPER_MODEL:-medium}\"\nWHISPER_LANGUAGE=\"${WHISPER_LANGUAGE:-en}\"\nOLLAMA_MODEL=\"${OLLAMA_MODEL:-llama3.1:8b}\"\n\nmkdir -p \"$WATCH_DIR\" \"$OUT_DIR\" \"$WORK_DIR\"\n\nVIDEO=\"$(find \"$WATCH_DIR\" -type f \\( -iname '*.mp4' -o -iname '*.mov' -o -iname '*.mkv' -o -iname '*.avi' -o -iname '*.webm' \\) | sort | head -n 1)\"\n\nif [ -z \"$VIDEO\" ]; then\n  echo '{\"found\":false}'\n  exit 0\nfi\n\nBASENAME=\"$(basename \"$VIDEO\")\"\nSTEM=\"${BASENAME%.*}\"\nCAPTION_DIR=\"$OUT_DIR/$STEM\"\nmkdir -p \"$CAPTION_DIR\"\n\nSRT_PATH=\"$CAPTION_DIR/$STEM.srt\"\nVTT_PATH=\"$CAPTION_DIR/$STEM.vtt\"\nCLEANED_TXT_PATH=\"$CAPTION_DIR/$STEM.cleaned.txt\"\n\nif [ -f \"$SRT_PATH\" ] && [ -f \"$VTT_PATH\" ]; then\n  echo '{\"found\":false,\"skipped\":\"already_captioned\"}'\n  exit 0\nfi\n\nAUDIO_PATH=\"$WORK_DIR/$STEM.wav\"\nWHISPER_JSON_PATH=\"$WORK_DIR/$STEM.json\"\n\nexport VIDEO BASENAME STEM CAPTION_DIR AUDIO_PATH WHISPER_JSON_PATH SRT_PATH VTT_PATH CLEANED_TXT_PATH WHISPER_MODEL WHISPER_LANGUAGE OLLAMA_MODEL\n\npython3 - <<'PY'\nimport json\nimport os\nprint(json.dumps({\n  \"found\": True,\n  \"videoPath\": os.environ[\"VIDEO\"],\n  \"baseName\": os.environ[\"BASENAME\"],\n  \"stem\": os.environ[\"STEM\"],\n  \"captionDir\": os.environ[\"CAPTION_DIR\"],\n  \"audioPath\": os.environ[\"AUDIO_PATH\"],\n  \"whisperJsonPath\": os.environ[\"WHISPER_JSON_PATH\"],\n  \"srtPath\": os.environ[\"SRT_PATH\"],\n  \"vttPath\": os.environ[\"VTT_PATH\"],\n  \"cleanedTxtPath\": os.environ[\"CLEANED_TXT_PATH\"],\n  \"whisperModel\": os.environ[\"WHISPER_MODEL\"],\n  \"whisperLanguage\": os.environ[\"WHISPER_LANGUAGE\"],\n  \"ollamaModel\": os.environ[\"OLLAMA_MODEL\"]\n}))\nPY"
+      },
+      "id": "Cmd_FindPendingVideo",
+      "name": "Find Pending Video",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -1020,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = ($json.stdout ?? '').toString().trim();\nif (!raw) return [];\nconst parsed = JSON.parse(raw);\nif (!parsed.found) return [];\nreturn [{ json: parsed }];"
+      },
+      "id": "Code_ParseFinderOutput",
+      "name": "Parse Finder Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -800,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "command": "ffmpeg -y -i \"{{$json.videoPath}}\" -vn -ac 1 -ar 16000 -c:a pcm_s16le \"{{$json.audioPath}}\""
+      },
+      "id": "Cmd_ExtractAudio",
+      "name": "Extract Audio (FFmpeg)",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -580,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "command": "whisper \"{{$json.audioPath}}\" --model \"{{$json.whisperModel}}\" --language \"{{$json.whisperLanguage}}\" --task transcribe --output_format verbose_json --output_dir \"{{$json.captionDir}}\" --fp16 False"
+      },
+      "id": "Cmd_WhisperTranscribe",
+      "name": "Transcribe (Whisper)",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -360,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "command": "python3 - <<'PY'\nimport json\nfrom pathlib import Path\ncaption_dir = Path(\"{{$json.captionDir}}\")\njson_path = caption_dir / \"{{$json.stem}}.json\"\nprint(json.dumps({\"whisper\": json.loads(json_path.read_text(encoding=\"utf-8\"))}))\nPY"
+      },
+      "id": "Cmd_ReadWhisperJson",
+      "name": "Read Whisper JSON",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -140,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = ($json.stdout ?? '').toString();\nconst parsed = JSON.parse(raw);\nconst whisper = parsed.whisper ?? {};\nconst segments = Array.isArray(whisper.segments) ? whisper.segments : [];\nconst normalized = segments.map((s, idx) => ({\n  index: idx + 1,\n  start: Number(s.start ?? 0),\n  end: Number(s.end ?? 0),\n  text: (s.text ?? '').toString().trim(),\n})).filter((s) => s.text.length > 0);\n\nconst prompt = [\n  'You are a subtitle cleanup assistant.',\n  'Rewrite each segment text for readability while preserving meaning and timestamps.',\n  'Do not merge/split segments. Keep same number of segments and order.',\n  'Return strict JSON only in this shape:',\n  '{\"segments\":[{\"index\":1,\"text\":\"...\"}]}',\n  '',\n  'Segments:',\n  JSON.stringify(normalized, null, 2),\n].join('\\n');\n\nreturn [{\n  json: {\n    ...$json,\n    whisper,\n    segments: normalized,\n    ollamaPrompt: prompt,\n  },\n}];"
+      },
+      "id": "Code_PrepareSegments",
+      "name": "Prepare Segments",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { model: $json.ollamaModel, prompt: $json.ollamaPrompt, stream: false, format: 'json' } }}",
+        "options": {}
+      },
+      "id": "HTTP_OllamaCleanup",
+      "name": "Clean Transcript (Ollama)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const original = Array.isArray($json.segments) ? $json.segments : [];\nconst responseStr = ($json.response ?? '').toString().trim();\n\nlet cleanedByIndex = new Map();\ntry {\n  const parsed = JSON.parse(responseStr);\n  if (Array.isArray(parsed.segments)) {\n    for (const seg of parsed.segments) {\n      const idx = Number(seg.index);\n      const txt = (seg.text ?? '').toString().trim();\n      if (Number.isFinite(idx) && txt) cleanedByIndex.set(idx, txt);\n    }\n  }\n} catch (e) {\n}\n\nconst merged = original.map((seg) => ({\n  ...seg,\n  text: cleanedByIndex.get(seg.index) ?? seg.text,\n}));\n\nfunction srtTime(sec) {\n  const ms = Math.max(0, Math.round(sec * 1000));\n  const h = Math.floor(ms / 3600000);\n  const m = Math.floor((ms % 3600000) / 60000);\n  const s = Math.floor((ms % 60000) / 1000);\n  const milli = ms % 1000;\n  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(milli).padStart(3, '0')}`;\n}\n\nfunction vttTime(sec) {\n  const ms = Math.max(0, Math.round(sec * 1000));\n  const h = Math.floor(ms / 3600000);\n  const m = Math.floor((ms % 3600000) / 60000);\n  const s = Math.floor((ms % 60000) / 1000);\n  const milli = ms % 1000;\n  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(milli).padStart(3, '0')}`;\n}\n\nconst srt = merged.map((seg) => `${seg.index}\\n${srtTime(seg.start)} --> ${srtTime(seg.end)}\\n${seg.text}\\n`).join('\\n');\nconst vttBody = merged.map((seg) => `${vttTime(seg.start)} --> ${vttTime(seg.end)}\\n${seg.text}\\n`).join('\\n');\nconst vtt = `WEBVTT\\n\\n${vttBody}`;\nconst cleanedTxt = merged.map((seg) => seg.text).join('\\n');\n\nreturn [{\n  json: {\n    ...$json,\n    cleanedSegments: merged,\n    srtBase64: Buffer.from(srt, 'utf8').toString('base64'),\n    vttBase64: Buffer.from(vtt, 'utf8').toString('base64'),\n    cleanedTxtBase64: Buffer.from(cleanedTxt, 'utf8').toString('base64'),\n    processedAt: new Date().toISOString(),\n  },\n}];"
+      },
+      "id": "Code_GenerateCaptions",
+      "name": "Generate SRT/VTT",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "command": "python3 - <<'PY'\nimport base64\nfrom pathlib import Path\n\noutputs = [\n  (\"{{$json.srtPath}}\", \"{{$json.srtBase64}}\"),\n  (\"{{$json.vttPath}}\", \"{{$json.vttBase64}}\"),\n  (\"{{$json.cleanedTxtPath}}\", \"{{$json.cleanedTxtBase64}}\"),\n]\n\nfor path_str, data_b64 in outputs:\n  path = Path(path_str)\n  path.parent.mkdir(parents=True, exist_ok=True)\n  path.write_bytes(base64.b64decode(data_b64))\n\nprint(\"saved\")\nPY"
+      },
+      "id": "Cmd_WriteCaptionFiles",
+      "name": "Save Caption Files",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        740,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "videoPath",
+              "name": "videoPath",
+              "value": "={{$json.videoPath}}",
+              "type": "string"
+            },
+            {
+              "id": "srtPath",
+              "name": "srtPath",
+              "value": "={{$json.srtPath}}",
+              "type": "string"
+            },
+            {
+              "id": "vttPath",
+              "name": "vttPath",
+              "value": "={{$json.vttPath}}",
+              "type": "string"
+            },
+            {
+              "id": "cleanedTxtPath",
+              "name": "cleanedTxtPath",
+              "value": "={{$json.cleanedTxtPath}}",
+              "type": "string"
+            },
+            {
+              "id": "processedAt",
+              "name": "processedAt",
+              "value": "={{$json.processedAt}}",
+              "type": "string"
+            },
+            {
+              "id": "status",
+              "name": "status",
+              "value": "done",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "Set_Result",
+      "name": "Caption Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        960,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Watch Tick": {
+      "main": [
+        [
+          {
+            "node": "Find Pending Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Pending Video": {
+      "main": [
+        [
+          {
+            "node": "Parse Finder Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Finder Output": {
+      "main": [
+        [
+          {
+            "node": "Extract Audio (FFmpeg)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Audio (FFmpeg)": {
+      "main": [
+        [
+          {
+            "node": "Transcribe (Whisper)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe (Whisper)": {
+      "main": [
+        [
+          {
+            "node": "Read Whisper JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Whisper JSON": {
+      "main": [
+        [
+          {
+            "node": "Prepare Segments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Segments": {
+      "main": [
+        [
+          {
+            "node": "Clean Transcript (Ollama)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Transcript (Ollama)": {
+      "main": [
+        [
+          {
+            "node": "Generate SRT/VTT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate SRT/VTT": {
+      "main": [
+        [
+          {
+            "node": "Save Caption Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Caption Files": {
+      "main": [
+        [
+          {
+            "node": "Caption Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": false
+}
