@@ -16,7 +16,7 @@
         -1400,
         300
       ],
-      "webhookId": "25FFACAA-7E87-43C8-B2DB-24F1A16B13F5"
+      "webhookId": "CA6A5E7C-7E94-42ED-99E3-099F3CD87E42"
     },
     {
       "parameters": {
@@ -35,7 +35,7 @@
       "parameters": {
         "mode": "runOnceForAllItems",
         "language": "python",
-        "pythonCode": "\nimport json, os\nitem = _input.first().json\nslug = item[\"slug\"]\nroot = \"/home/node/files/films/\" + slug\npfile = os.path.join(root, \"project.json\")\nif not os.path.exists(pfile):\n    raise RuntimeError(\"No project found at \" + root + \". Create it first via the Project Setup form.\")\nwith open(pfile) as fh:\n    proj = json.load(fh)\nstory = (proj.get(\"story\") or \"\").strip()\nif not story:\n    raise RuntimeError(\"project.json has no story.\")\nreturn [{\"json\": {\"ok\": True, \"slug\": slug, \"title\": proj.get(\"title\", \"Untitled\"),\n                  \"story\": story, \"extra_direction\": item.get(\"extra_direction\", \"\")}}]\n"
+        "pythonCode": "\nimport json, os\nitem = _items[0][\"json\"]\nslug = item[\"slug\"]\nroot = \"/home/node/files/films/\" + slug\npfile = os.path.join(root, \"project.json\")\nif not os.path.exists(pfile):\n    raise RuntimeError(\"No project found at \" + root + \". Create it first via the Project Setup form.\")\nwith open(pfile) as fh:\n    proj = json.load(fh)\nstory = (proj.get(\"story\") or \"\").strip()\nif not story:\n    raise RuntimeError(\"project.json has no story.\")\nreturn [{\"json\": {\"ok\": True, \"slug\": slug, \"title\": proj.get(\"title\", \"Untitled\"),\n                  \"story\": story, \"extra_direction\": item.get(\"extra_direction\", \"\")}}]\n"
       },
       "id": "Py_LoadStory",
       "name": "Load Story",
@@ -117,7 +117,7 @@
       "parameters": {
         "mode": "runOnceForAllItems",
         "language": "python",
-        "pythonCode": "\nimport datetime, json, os\nitem = _input.first().json\ndata = item[\"script\"]\nslug = item[\"slug\"]\nroot = \"/home/node/files/films/\" + slug\nif not os.path.isdir(root):\n    raise RuntimeError(\"project dir missing: \" + root)\nwith open(os.path.join(root, \"script.json\"), \"w\") as fh:\n    json.dump(data, fh, indent=2, ensure_ascii=False)\npf = os.path.join(root, \"project.json\")\nproj = json.load(open(pf)) if os.path.exists(pf) else {}\nnow = datetime.datetime.utcnow().isoformat() + \"Z\"\nproj.update({\"slug\": slug, \"status\": \"script_ready\", \"updated_at\": now})\nproj.setdefault(\"counts\", {})[\"shots\"] = sum(len(s[\"shots\"]) for s in data[\"scenes\"])\nproj[\"counts\"][\"characters\"] = len(data[\"characters\"])\nproj.setdefault(\"stages\", {})[\"script\"] = {\"status\": \"done\", \"done_at\": now}\nwith open(pf, \"w\") as fh:\n    json.dump(proj, fh, indent=2, ensure_ascii=False)\nreturn [{\"json\": {\"ok\": True, \"shots\": proj[\"counts\"][\"shots\"], \"characters\": proj[\"counts\"][\"characters\"]}}]\n"
+        "pythonCode": "\nimport datetime, json, os\nitem = _items[0][\"json\"]\ndata = item[\"script\"]\nslug = item[\"slug\"]\nroot = \"/home/node/files/films/\" + slug\nif not os.path.isdir(root):\n    raise RuntimeError(\"project dir missing: \" + root)\nwith open(os.path.join(root, \"script.json\"), \"w\") as fh:\n    json.dump(data, fh, indent=2, ensure_ascii=False)\npf = os.path.join(root, \"project.json\")\nproj = json.load(open(pf)) if os.path.exists(pf) else {}\nnow = datetime.datetime.utcnow().isoformat() + \"Z\"\nproj.update({\"slug\": slug, \"status\": \"script_ready\", \"updated_at\": now})\nproj.setdefault(\"counts\", {})[\"shots\"] = sum(len(s[\"shots\"]) for s in data[\"scenes\"])\nproj[\"counts\"][\"characters\"] = len(data[\"characters\"])\nproj.setdefault(\"stages\", {})[\"script\"] = {\"status\": \"done\", \"done_at\": now}\nwith open(pf, \"w\") as fh:\n    json.dump(proj, fh, indent=2, ensure_ascii=False)\nreturn [{\"json\": {\"ok\": True, \"shots\": proj[\"counts\"][\"shots\"], \"characters\": proj[\"counts\"][\"characters\"]}}]\n"
       },
       "id": "Py_SaveScript",
       "name": "Save Script",
