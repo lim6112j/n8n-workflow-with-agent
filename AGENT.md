@@ -8,7 +8,7 @@ Target server is a Dockerized n8n instance exposed at `http://localhost:5678`.
 - `N8N_BASE_URL=http://localhost:5678`
 - `N8N_API_BASE=$N8N_BASE_URL/api/v1`
 - `N8N_API_KEY={{N8N_API_KEY}}` (create in n8n UI: Settings → API Keys)
-
+- `N8N_API_KEY={{LOCAL_N8N_API_KEY}}` (when above n8n api key not working, use this)
 Never print or commit real API keys.
 
 ## Required API header
