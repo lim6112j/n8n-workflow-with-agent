@@ -3,59 +3,24 @@
   "nodes": [
     {
       "parameters": {
+        "httpMethod": "POST",
         "path": "film-gen-voice",
-        "formTitle": "AI Film — Generate Voiceover",
-        "formDescription": "OpenAI TTS per narration/dialogue line, mixed per shot. Empty ids = only missing audio.",
-        "formFields": {
-          "values": [
-            {
-              "fieldLabel": "Project Slug",
-              "fieldName": "project_slug",
-              "requiredField": true
-            },
-            {
-              "fieldLabel": "Shot IDs to Regenerate (optional)",
-              "fieldName": "regen_ids",
-              "placeholder": "shot_002, shot_004",
-              "requiredField": false
-            },
-            {
-              "fieldLabel": "TTS Model",
-              "fieldName": "tts_model",
-              "fieldType": "dropdown",
-              "fieldOptions": {
-                "values": [
-                  {
-                    "option": "auto (from script)"
-                  },
-                  {
-                    "option": "gpt-4o-mini-tts"
-                  },
-                  {
-                    "option": "tts-1"
-                  }
-                ]
-              },
-              "requiredField": true
-            }
-          ]
-        },
-        "responseMode": "onReceived",
+        "responseMode": "lastNode",
         "options": {}
       },
-      "id": "Form_Voice",
-      "name": "Voice Form",
-      "type": "n8n-nodes-base.formTrigger",
-      "typeVersion": 2.4,
+      "id": "Hook_Voice",
+      "name": "Voice Hook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
       "position": [
         -1400,
         300
       ],
-      "webhookId": "88C5791C-97BC-46A7-8954-B66D864F1673"
+      "webhookId": "A5C03D68-6A09-4D38-AC23-9B5E2B8F2648"
     },
     {
       "parameters": {
-        "jsCode": "\nconst slug = ($json.project_slug ?? $json['Project Slug'] ?? '').toString().trim().toLowerCase().replace(/[^a-z0-9-]/g, '');\nif (!slug) throw new Error('Project Slug is required.');\nconst regenRaw = ($json.regen_ids ?? $json['Shot IDs to Regenerate (optional)'] ?? '').toString();\nconst regenIds = regenRaw.split(/[,\\s]+/).map((x) => x.trim().toLowerCase()).filter(Boolean);\nconst modelRaw = ($json.tts_model ?? $json['TTS Model'] ?? 'auto (from script)').toString();\nlet model = 'auto';\nif (modelRaw === 'gpt-4o-mini-tts') model = 'gpt-4o-mini-tts';\nelse if (modelRaw === 'tts-1') model = 'tts-1';\nreturn [{ json: { slug, payloadB64: Buffer.from(JSON.stringify({ slug, regen_ids: regenIds, tts_model: model })).toString('base64') } }];\n"
+        "jsCode": "\nconst body = $json.body ?? $json;\nconst slug = (body.project_slug ?? '').toString().trim().toLowerCase().replace(/[^a-z0-9-]/g, '');\nif (!slug) throw new Error('project_slug is required in the JSON body.');\nconst regenRaw = (body.regen_ids ?? '').toString();\nconst regenIds = regenRaw.split(/[,\\s]+/).map((x) => x.trim().toLowerCase()).filter(Boolean);\nconst DEFAULT_TTS = 'google/gemini-3.1-flash-tts-preview';\nconst modelRaw = (body.tts_model ?? '').toString().trim();\nconst ttsModel = /^[a-z0-9][a-z0-9/_.:-]{2,80}$/i.test(modelRaw) ? modelRaw : DEFAULT_TTS;\nreturn [{ json: { slug, regen_ids: regenIds, tts_model: ttsModel } }];\n"
       },
       "id": "Code_BuildRequest",
       "name": "Build Request",
@@ -68,27 +33,16 @@
     },
     {
       "parameters": {
-        "command": "python3 - <<'PY'\nimport base64, json, os, sys\nreq = json.loads(base64.b64decode(\"{{ $json.payloadB64 }}\").decode(\"utf-8\"))\nroot = \"/home/node/files/films/\" + req[\"slug\"]\nspath = os.path.join(root, \"script.json\")\nif not os.path.exists(spath):\n    print(json.dumps({\"ok\": False, \"error\": \"no script.json in \" + root + \" — run the Script stage first\"}))\n    sys.exit(1)\nscript = json.load(open(spath))\nchars = {c[\"id\"]: c for c in script.get(\"characters\", [])}\nVOICES = {\"alloy\", \"ash\", \"coral\", \"echo\", \"fable\", \"onyx\", \"nova\", \"sage\", \"shimmer\"}\noverride = req.get(\"tts_model\") or \"auto\"\nif override not in (\"gpt-4o-mini-tts\", \"tts-1\"):\n    override = None\nregen = set(req.get(\"regen_ids\") or [])\nlines = []\nfor scene in script.get(\"scenes\", []):\n    for shot in scene.get(\"shots\", []):\n        sid = shot[\"id\"]\n        pending = []\n        if shot.get(\"narration\"):\n            pending.append({\"text\": shot[\"narration\"], \"voice\": script.get(\"narrator_voice\", \"fable\"),\n                            \"instructions\": script.get(\"narrator_instructions\", \"\"), \"model\": \"gpt-4o-mini-tts\"})\n        k = 1\n        for d in shot.get(\"dialogue\") or []:\n            k += 1\n            c = chars.get(d.get(\"character\", \"\"), {})\n            pending.append({\"text\": d.get(\"text\", \"\"), \"voice\": c.get(\"voice\", \"fable\"),\n                            \"instructions\": c.get(\"tts_instructions\", \"\"), \"model\": c.get(\"tts_model\", \"gpt-4o-mini-tts\")})\n        seq = 0\n        for item in pending:\n            seq += 1\n            lid = sid + \"_L%02d\" % seq\n            out_rel = \"audio/lines/\" + lid + \".mp3\"\n            exists = os.path.exists(os.path.join(root, out_rel))\n            if exists and sid not in regen:\n                continue\n            text = (item[\"text\"] or \"\").strip()[:4000]\n            if not text:\n                continue\n            voice = item[\"voice\"] if item[\"voice\"] in VOICES else \"fable\"\n            model = override or item.get(\"model\") or \"gpt-4o-mini-tts\"\n            lines.append({\"slug\": req[\"slug\"], \"shotId\": sid, \"lineId\": lid, \"text\": text,\n                          \"voice\": voice, \"tts_model\": model,\n                          \"instructions\": (item.get(\"instructions\") or \"\").strip()[:500], \"outPath\": out_rel})\nprint(json.dumps({\"ok\": True, \"slug\": req[\"slug\"], \"lines\": lines}, ensure_ascii=False))\nPY"
+        "mode": "runOnceForAllItems",
+        "language": "python",
+        "pythonCode": "\nimport json, os, re\nitem = _input.first().json\nslug = item[\"slug\"]\nroot = \"/home/node/files/films/\" + slug\nspath = os.path.join(root, \"script.json\")\nif not os.path.exists(spath):\n    raise RuntimeError(\"no script.json in \" + root + \" — run the Script stage first\")\nwith open(spath) as fh:\n    script = json.load(fh)\nchars = {c[\"id\"]: c for c in script.get(\"characters\", [])}\nDEFAULT_TTS = \"google/gemini-3.1-flash-tts-preview\"\ndef ok_model(m):\n    return bool(re.fullmatch(r\"[A-Za-z0-9][A-Za-z0-9/_.:\\-]{2,80}\", m or \"\"))\ndef ok_voice(v):\n    return bool(re.fullmatch(r\"[A-Za-z0-9_\\-:.]{2,40}\", (v or \"\").strip()))\noverride = item.get(\"tts_model\") if ok_model(item.get(\"tts_model\")) else None\nregen = set(item.get(\"regen_ids\") or [])\nlines = []\nfor scene in script.get(\"scenes\", []):\n    for shot in scene.get(\"shots\", []):\n        sid = shot[\"id\"]\n        pending = []\n        if shot.get(\"narration\"):\n            pending.append({\"text\": shot[\"narration\"], \"voice\": script.get(\"narrator_voice\", \"charon\"),\n                            \"instructions\": script.get(\"narrator_instructions\", \"\"), \"model\": DEFAULT_TTS})\n        k = 1\n        for d in shot.get(\"dialogue\") or []:\n            k += 1\n            c = chars.get(d.get(\"character\", \"\"), {})\n            pending.append({\"text\": d.get(\"text\", \"\"), \"voice\": c.get(\"voice\", \"kore\"),\n                            \"instructions\": c.get(\"tts_instructions\", \"\"), \"model\": c.get(\"tts_model\", DEFAULT_TTS)})\n        seq = 0\n        for entry in pending:\n            seq += 1\n            lid = sid + \"_L%02d\" % seq\n            out_rel = \"audio/lines/\" + lid + \".mp3\"\n            exists = os.path.exists(os.path.join(root, out_rel))\n            if exists and sid not in regen:\n                continue\n            text = (entry.get(\"text\") or \"\").strip()[:3800]\n            if not text:\n                continue\n            voice = (entry.get(\"voice\") or \"\").strip().lower() if ok_voice(entry.get(\"voice\")) else \"kore\"\n            model = override or (entry.get(\"model\") if ok_model(entry.get(\"model\")) else None) or DEFAULT_TTS\n            instr = (entry.get(\"instructions\") or \"\").strip()[:500]\n            if instr:\n                text = (instr + \": \" + text)[:4000]  # expressive TTS models treat a leading directive as style\n            lines.append({\"slug\": slug, \"shotId\": sid, \"lineId\": lid, \"text\": text,\n                          \"voice\": voice, \"tts_model\": model, \"outPath\": out_rel})\nif not lines:\n    raise RuntimeError(\"All voiceover audio already exists. Enter shot ids in the form to force regeneration.\")\nreturn [{\"json\": {\"ok\": True, \"slug\": slug, \"lines\": lines}}]\n"
       },
-      "id": "Cmd_LoadLines",
+      "id": "Py_LoadLines",
       "name": "Load TTS Lines",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [
-        -880,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "\nconst res = JSON.parse(($json.stdout ?? '').toString().trim());\nif (!res.ok) throw new Error(res.error || 'Failed to load TTS lines.');\nif (!res.lines.length) throw new Error('All voiceover audio already exists. Enter shot ids in the form to force regeneration.');\nreturn [{ json: { slug: res.slug, lines: res.lines } }];\n"
-      },
-      "id": "Code_CheckLines",
-      "name": "Check Lines",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -620,
+        -880,
         300
       ]
     },
@@ -102,19 +56,19 @@
       "type": "n8n-nodes-base.splitOut",
       "typeVersion": 1,
       "position": [
-        -360,
+        -620,
         300
       ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "https://api.openai.com/v1/audio/speech",
+        "url": "https://openrouter.ai/api/v1/audio/speech",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "openAiApi",
+        "nodeCredentialType": "openRouterApi",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ $json.instructions ? { model: $json.tts_model, input: $json.text, voice: $json.voice, response_format: 'mp3', speed: 1, instructions: $json.instructions } : { model: $json.tts_model, input: $json.text, voice: $json.voice, response_format: 'mp3', speed: 1 } }}",
+        "jsonBody": "={{ { model: $json.tts_model, input: $json.text, voice: $json.voice, response_format: 'mp3' } }}",
         "options": {
           "timeout": 120000,
           "response": {
@@ -126,17 +80,17 @@
         }
       },
       "id": "Http_TTS",
-      "name": "OpenAI TTS",
+      "name": "OpenRouter TTS",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -100,
+        -360,
         300
       ],
       "credentials": {
-        "openAiApi": {
-          "id": "OPENAI_CRED_ID",
-          "name": "OpenAI"
+        "openRouterApi": {
+          "id": "CrCtPveFpgBQ5Pir",
+          "name": "OpenRouter account"
         }
       },
       "retryOnFail": true,
@@ -145,53 +99,29 @@
     },
     {
       "parameters": {
-        "jsCode": "\nconst srcs = $('Split Lines').all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const line = srcs[i].json;\n  const buf = await this.helpers.getBinaryDataBuffer(i, 'data');\n  if (!buf || !buf.length) throw new Error('No audio returned for line ' + (line.lineId ?? i));\n  const destDir = '/home/node/files/films/' + line.slug + '/audio/lines';\n  const destPath = destDir + '/' + line.lineId + '.mp3';\n  const b64 = buf.toString('base64');\n  const SIZE = 60000;\n  const nChunks = Math.max(1, Math.ceil(b64.length / SIZE));\n  for (let s = 0; s < nChunks; s++) {\n    out.push({ json: {\n      fileId: line.slug + '_' + line.lineId, destDir, destPath, seq: s,\n      isLast: (s === nChunks - 1) ? 1 : 0,\n      chunkB64: b64.slice(s * SIZE, (s + 1) * SIZE),\n    }});\n  }\n}\nreturn out;\n"
+        "jsCode": "\nconst srcs = $('Split Lines').all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const line = srcs[i].json;\n  const buf = await this.helpers.getBinaryDataBuffer(i, 'data');\n  if (!buf || !buf.length) throw new Error('No audio returned for line ' + (line.lineId ?? i));\n  out.push({ json: { slug: line.slug, shotId: line.shotId, lineId: line.lineId, audioB64: buf.toString('base64') } });\n}\nreturn out;\n"
       },
-      "id": "Code_AudioChunk",
-      "name": "Collect Audio & Chunk",
+      "id": "Code_CollectAudio",
+      "name": "Collect Audio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "python",
+        "pythonCode": "\nimport base64, datetime, json, os, subprocess\nitems = _input.all()\nif not items:\n    raise RuntimeError(\"no audio lines received\")\nfirst = items[0].json\nslug = first[\"slug\"]\nroot = \"/home/node/files/films/\" + slug\nos.makedirs(os.path.join(root, \"audio\", \"lines\"), exist_ok=True)\nfor it in items:\n    d = it.json\n    p = os.path.join(root, d[\"outPath\"])\n    os.makedirs(os.path.dirname(p), exist_ok=True)\n    with open(p, \"wb\") as fh:\n        fh.write(base64.b64decode(d[\"audioB64\"]))\nwith open(os.path.join(root, \"script.json\")) as fh:\n    script = json.load(fh)\nsil = \"/tmp/n8nfilm_sil.mp3\"\nif not os.path.exists(sil):\n    subprocess.run([\"ffmpeg\", \"-y\", \"-loglevel\", \"error\", \"-f\", \"lavfi\", \"-i\", \"anullsrc=r=24000:cl=mono\",\n                    \"-t\", \"0.25\", \"-c:a\", \"libmp3lame\", \"-q:a\", \"6\", sil], check=True)\ndurations = {}\nfor scene in script.get(\"scenes\", []):\n    for shot in scene.get(\"shots\", []):\n        sid = shot[\"id\"]\n        line_files = []\n        if shot.get(\"narration\"):\n            line_files.append(os.path.join(root, \"audio\", \"lines\", sid + \"_L01.mp3\"))\n        k = 1\n        for _ in shot.get(\"dialogue\") or []:\n            k += 1\n            line_files.append(os.path.join(root, \"audio\", \"lines\", sid + \"_L%02d.mp3\" % k))\n        line_files = [p for p in line_files if os.path.exists(p)]\n        if not line_files:\n            continue\n        lst = \"/tmp/n8nfilm_mix_\" + sid + \".txt\"\n        with open(lst, \"w\") as fh:\n            for j, p in enumerate(line_files):\n                if j:\n                    fh.write(\"file '\" + sil + \"'\\n\")\n                fh.write(\"file '\" + p + \"'\\n\")\n        out = os.path.join(root, \"audio\", sid + \".mp3\")\n        subprocess.run([\"ffmpeg\", \"-y\", \"-loglevel\", \"error\", \"-f\", \"concat\", \"-safe\", \"0\", \"-i\", lst,\n                        \"-c:a\", \"libmp3lame\", \"-q:a\", \"4\", \"-ar\", \"24000\", \"-ac\", \"1\", out], check=True)\n        pr = subprocess.run([\"ffprobe\", \"-v\", \"error\", \"-show_entries\", \"format=duration\", \"-of\", \"csv=p=0\", out],\n                            capture_output=True, text=True, check=True)\n        durations[sid] = round(float(pr.stdout.strip()), 3)\nnow = datetime.datetime.utcnow().isoformat() + \"Z\"\npf = os.path.join(root, \"project.json\")\nproj = json.load(open(pf)) if os.path.exists(pf) else {}\nproj.update({\"status\": \"voice_ready\", \"updated_at\": now})\nproj.setdefault(\"stages\", {})[\"voiceover\"] = {\"status\": \"done\", \"done_at\": now, \"durations\": durations}\nwith open(pf, \"w\") as fh:\n    json.dump(proj, fh, indent=2, ensure_ascii=False)\nreturn [{\"json\": {\"ok\": True, \"slug\": slug, \"durations\": durations}}]\n"
+      },
+      "id": "Py_WriteMix",
+      "name": "Write Audio & Mix Shot Tracks",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         160,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "command": "TMP=\"/tmp/n8nfilm_{{ $json.fileId }}.b64\"\nif [ \"{{ $json.seq }}\" = \"0\" ]; then : > \"$TMP\"; fi\nprintf '%s' '{{ $json.chunkB64 }}' >> \"$TMP\"\nif [ \"{{ $json.isLast }}\" = \"1\" ]; then\n  mkdir -p \"{{ $json.destDir }}\"\n  python3 -c \"import base64; open('{{ $json.destPath }}','wb').write(base64.b64decode(open('$TMP').read()))\" && rm -f \"$TMP\" && echo \"saved {{ $json.destPath }}\"\nfi"
-      },
-      "id": "Cmd_WriteAudio",
-      "name": "Write Line Audio",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [
-        420,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "\nconst res = JSON.parse($('Load TTS Lines').first().json.stdout.trim());\nreturn [{ json: { slug: res.slug, payloadB64: Buffer.from(JSON.stringify({ slug: res.slug })).toString('base64') } }];\n"
-      },
-      "id": "Code_MixPlan",
-      "name": "Build Mix Plan",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        420,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "command": "python3 - <<'PY'\nimport base64, datetime, json, os, subprocess\nreq = json.loads(base64.b64decode(\"{{ $json.payloadB64 }}\").decode(\"utf-8\"))\nroot = \"/home/node/files/films/\" + req[\"slug\"]\nscript = json.load(open(os.path.join(root, \"script.json\")))\nos.makedirs(os.path.join(root, \"audio\"), exist_ok=True)\nsil = \"/tmp/n8nfilm_sil.mp3\"\nif not os.path.exists(sil):\n    subprocess.run([\"ffmpeg\", \"-y\", \"-loglevel\", \"error\", \"-f\", \"lavfi\", \"-i\", \"anullsrc=r=24000:cl=mono\",\n                    \"-t\", \"0.25\", \"-c:a\", \"libmp3lame\", \"-q:a\", \"6\", sil], check=True)\ndurations = {}\nfor scene in script.get(\"scenes\", []):\n    for shot in scene.get(\"shots\", []):\n        sid = shot[\"id\"]\n        line_files = []\n        if shot.get(\"narration\"):\n            line_files.append(os.path.join(root, \"audio\", \"lines\", sid + \"_L01.mp3\"))\n        k = 1\n        for _ in shot.get(\"dialogue\") or []:\n            k += 1\n            line_files.append(os.path.join(root, \"audio\", \"lines\", sid + \"_L%02d.mp3\" % k))\n        line_files = [p for p in line_files if os.path.exists(p)]\n        if not line_files:\n            continue\n        lst = \"/tmp/n8nfilm_mix_\" + sid + \".txt\"\n        with open(lst, \"w\") as fh:\n            for j, p in enumerate(line_files):\n                if j:\n                    fh.write(\"file '\" + sil + \"'\\n\")\n                fh.write(\"file '\" + p + \"'\\n\")\n        out = os.path.join(root, \"audio\", sid + \".mp3\")\n        subprocess.run([\"ffmpeg\", \"-y\", \"-loglevel\", \"error\", \"-f\", \"concat\", \"-safe\", \"0\", \"-i\", lst,\n                        \"-c:a\", \"libmp3lame\", \"-q:a\", \"4\", \"-ar\", \"24000\", \"-ac\", \"1\", out], check=True)\n        p = subprocess.run([\"ffprobe\", \"-v\", \"error\", \"-show_entries\", \"format=duration\", \"-of\", \"csv=p=0\", out],\n                           capture_output=True, text=True, check=True)\n        durations[sid] = round(float(p.stdout.strip()), 3)\nnow = datetime.datetime.utcnow().isoformat() + \"Z\"\npf = os.path.join(root, \"project.json\")\nproj = json.load(open(pf)) if os.path.exists(pf) else {}\nproj.update({\"status\": \"voice_ready\", \"updated_at\": now})\nproj.setdefault(\"stages\", {})[\"voiceover\"] = {\"status\": \"done\", \"done_at\": now, \"durations\": durations}\nwith open(pf, \"w\") as fh:\n    json.dump(proj, fh, indent=2, ensure_ascii=False)\nprint(json.dumps({\"ok\": True, \"durations\": durations}))\nPY"
-      },
-      "id": "Cmd_MixShots",
-      "name": "Mix Shot Tracks",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [
-        680,
         300
       ]
     },
@@ -202,19 +132,19 @@
             {
               "id": "slug",
               "name": "slug",
-              "value": "={{ $('Build Mix Plan').first().json.slug }}",
+              "value": "={{ $('Write Audio & Mix Shot Tracks').first().json.slug }}",
               "type": "string"
             },
             {
               "id": "audioPath",
               "name": "audioPath",
-              "value": "=/home/node/files/films/{{ $('Build Mix Plan').first().json.slug }}/audio",
+              "value": "=/home/node/files/films/{{ $('Write Audio & Mix Shot Tracks').first().json.slug }}/audio",
               "type": "string"
             },
             {
               "id": "nextStep",
               "name": "nextStep",
-              "value": "=Listen to audio/shot_XXX.mp3 files. List shot ids in the Voice form to redo any. Then assemble at http://localhost:5678/form/film-assemble.",
+              "value": "=Listen to audio/shot_XXX.mp3 files. Re-POST to http://localhost:5678/webhook/film-gen-voice with {\"project_slug\": \"<slug>\", \"regen_ids\": \"shot_002\"} to redo any. Or POST to http://localhost:5678/webhook/film-assemble to render the film.",
               "type": "string"
             }
           ]
@@ -226,13 +156,13 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        940,
+        420,
         300
       ]
     }
   ],
   "connections": {
-    "Voice Form": {
+    "Voice Hook": {
       "main": [
         [
           {
@@ -258,17 +188,6 @@
       "main": [
         [
           {
-            "node": "Check Lines",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Check Lines": {
-      "main": [
-        [
-          {
             "node": "Split Lines",
             "type": "main",
             "index": 0
@@ -280,58 +199,36 @@
       "main": [
         [
           {
-            "node": "OpenAI TTS",
+            "node": "OpenRouter TTS",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "OpenAI TTS": {
+    "OpenRouter TTS": {
       "main": [
         [
           {
-            "node": "Collect Audio & Chunk",
+            "node": "Collect Audio",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Collect Audio & Chunk": {
+    "Collect Audio": {
       "main": [
         [
           {
-            "node": "Write Line Audio",
+            "node": "Write Audio & Mix Shot Tracks",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Write Line Audio": {
-      "main": [
-        [
-          {
-            "node": "Build Mix Plan",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build Mix Plan": {
-      "main": [
-        [
-          {
-            "node": "Mix Shot Tracks",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Mix Shot Tracks": {
+    "Write Audio & Mix Shot Tracks": {
       "main": [
         [
           {

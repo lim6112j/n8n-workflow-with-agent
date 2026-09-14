@@ -3,50 +3,24 @@
   "nodes": [
     {
       "parameters": {
+        "httpMethod": "POST",
         "path": "film-project-setup",
-        "formTitle": "AI Film — Create Project",
-        "formDescription": "Start a new short-film project: your title, your story, and character reference images.",
-        "formFields": {
-          "values": [
-            {
-              "fieldLabel": "Film Title",
-              "fieldName": "film_title",
-              "placeholder": "The Lighthouse Keeper",
-              "requiredField": true
-            },
-            {
-              "fieldLabel": "Story",
-              "fieldName": "story",
-              "fieldType": "textarea",
-              "placeholder": "Write your story here",
-              "requiredField": true
-            },
-            {
-              "fieldLabel": "Reference Images",
-              "fieldName": "ref_images",
-              "fieldType": "file",
-              "multipleFiles": true,
-              "acceptFileTypes": ".jpg,.jpeg,.png,.webp",
-              "requiredField": true
-            }
-          ]
-        },
-        "responseMode": "onReceived",
+        "responseMode": "lastNode",
         "options": {}
       },
-      "id": "Form_Setup",
-      "name": "Project Setup Form",
-      "type": "n8n-nodes-base.formTrigger",
-      "typeVersion": 2.4,
+      "id": "Hook_Setup",
+      "name": "Project Setup Hook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
       "position": [
         -1400,
         300
       ],
-      "webhookId": "4C87A323-5B30-4EDB-ACF7-CEAB961651F0"
+      "webhookId": "3D0A6539-DB40-4B74-BAA6-3BD8489BEA74"
     },
     {
       "parameters": {
-        "jsCode": "\nconst title = ($json.film_title ?? $json['Film Title'] ?? '').toString().trim();\nconst story = ($json.story ?? $json['Story'] ?? '').toString().trim();\nif (!title) throw new Error('Film Title is required.');\nif (!story || story.length < 20) throw new Error('Story is required (at least 20 characters).');\nconst slug = (title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60)) || 'untitled-film';\n\n// Collect uploaded reference images from binary properties (names vary by n8n version)\nconst bin = (items[0] && items[0].binary) ? items[0].binary : {};\nconst props = Object.keys(bin).sort();\nif (!props.length) throw new Error('No reference images were uploaded.');\nconst refs = [];\nfor (const prop of props) {\n  const meta = bin[prop] ?? {};\n  const filename = (meta.filename ?? 'upload.jpg').toString();\n  const extRaw = (filename.split('.').pop() ?? 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');\n  const ext = ['jpg', 'jpeg', 'png', 'webp'].includes(extRaw) ? extRaw : 'jpg';\n  const buf = await this.helpers.getBinaryDataBuffer(0, prop);\n  if (!buf || !buf.length) continue;\n  refs.push({ filename, mimetype: meta.mimeType ?? 'image/jpeg', ext, b64: buf.toString('base64') });\n}\nif (!refs.length) throw new Error('Reference image uploads could not be read.');\nif (refs.length > 6) throw new Error('Please upload at most 6 reference images.');\n\nconst payload = { title, story, slug, refs };\nreturn [{ json: {\n  title, slug, refCount: refs.length,\n  payloadB64: Buffer.from(JSON.stringify(payload)).toString('base64'),\n}}];\n"
+        "jsCode": "\nconst body = $json.body ?? $json;\nconst title = (body.film_title ?? body['Film Title'] ?? '').toString().trim();\nconst story = (body.story ?? body['Story'] ?? '').toString().trim();\nif (!title) throw new Error('Film Title is required.');\nif (!story || story.length < 20) throw new Error('Story is required (at least 20 characters).');\nconst slug = (title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60)) || 'untitled-film';\n\n// Collect uploaded reference images from binary properties (names vary by n8n version)\nconst bin = (items[0] && items[0].binary) ? items[0].binary : {};\nconst props = Object.keys(bin).sort();\nif (!props.length) throw new Error('No reference images were uploaded.');\nconst refs = [];\nfor (const prop of props) {\n  const meta = bin[prop] ?? {};\n  const filename = (meta.filename ?? 'upload.jpg').toString();\n  const extRaw = (filename.split('.').pop() ?? 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');\n  const ext = ['jpg', 'jpeg', 'png', 'webp'].includes(extRaw) ? extRaw : 'jpg';\n  const buf = await this.helpers.getBinaryDataBuffer(0, prop);\n  if (!buf || !buf.length) continue;\n  refs.push({ filename, ext, b64: buf.toString('base64') });\n}\nif (!refs.length) throw new Error('Reference image uploads could not be read.');\nif (refs.length > 6) throw new Error('Please upload at most 6 reference images.');\n\nreturn [{ json: { title, slug, refCount: refs.length, refs } }];\n"
       },
       "id": "Code_Normalize",
       "name": "Normalize Input",
@@ -59,12 +33,14 @@
     },
     {
       "parameters": {
-        "command": "python3 - <<'PY'\nimport base64, datetime, json, os\npayload = json.loads(base64.b64decode(\"{{ $json.payloadB64 }}\").decode(\"utf-8\"))\nslug = payload[\"slug\"]\nroot = \"/home/node/files/films/\" + slug\nfor sub in [\"\", \"refs\", \"refs/original\", \"shots\", \"audio\", \"audio/lines\", \"render\", \"music\", \"logs\"]:\n    os.makedirs(os.path.join(root, sub) if sub else root, exist_ok=True)\nfor i, ref in enumerate(payload[\"refs\"], 1):\n    p = os.path.join(root, \"refs\", \"original\", \"ref_%02d.%s\" % (i, ref[\"ext\"]))\n    with open(p, \"wb\") as fh:\n        fh.write(base64.b64decode(ref[\"b64\"]))\nnow = datetime.datetime.utcnow().isoformat() + \"Z\"\nproj = {\"slug\": slug, \"title\": payload[\"title\"], \"story\": payload[\"story\"],\n        \"created_at\": now, \"updated_at\": now, \"status\": \"created\", \"stages\": {},\n        \"counts\": {\"refs\": len(payload[\"refs\"])}, \"notes\": \"\"}\nwith open(os.path.join(root, \"project.json\"), \"w\") as fh:\n    json.dump(proj, fh, indent=2, ensure_ascii=False)\nprint(json.dumps({\"ok\": True, \"root\": root, \"refs\": len(payload[\"refs\"])}))\nPY"
+        "mode": "runOnceForAllItems",
+        "language": "python",
+        "pythonCode": "\nimport base64, datetime, json, os\nitem = _input.first().json\nslug = item[\"slug\"]\nroot = \"/home/node/files/films/\" + slug\nfor sub in [\"\", \"refs\", \"refs/original\", \"shots\", \"audio\", \"audio/lines\", \"render\", \"music\", \"logs\"]:\n    os.makedirs(os.path.join(root, sub) if sub else root, exist_ok=True)\nfor i, ref in enumerate(item[\"refs\"], 1):\n    p = os.path.join(root, \"refs\", \"original\", \"ref_%02d.%s\" % (i, ref[\"ext\"]))\n    with open(p, \"wb\") as fh:\n        fh.write(base64.b64decode(ref[\"b64\"]))\nnow = datetime.datetime.utcnow().isoformat() + \"Z\"\nproj = {\"slug\": slug, \"title\": item[\"title\"], \"story\": item[\"story\"],\n        \"created_at\": now, \"updated_at\": now, \"status\": \"created\", \"stages\": {},\n        \"counts\": {\"refs\": len(item[\"refs\"])}, \"notes\": \"\"}\nwith open(os.path.join(root, \"project.json\"), \"w\") as fh:\n    json.dump(proj, fh, indent=2, ensure_ascii=False)\nreturn [{\"json\": {\"ok\": True, \"root\": root, \"slug\": slug, \"refs\": len(item[\"refs\"])}}]\n"
       },
-      "id": "Cmd_WriteProject",
+      "id": "Py_WriteProject",
       "name": "Write Project Files",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         -880,
         300
@@ -72,12 +48,14 @@
     },
     {
       "parameters": {
-        "command": "cd \"/home/node/files/films/{{ $('Normalize Input').first().json.slug }}/refs\" || exit 1\ni=1\nfor f in original/*; do\n  ffmpeg -y -loglevel error -i \"$f\" -vf \"scale='min(1024,iw)':-2\" -q:v 4 \"ref_$(printf '%02d' $i).jpg\" || echo \"normalize failed: $f\"\n  i=$((i+1))\ndone\nls -la . | tail -n +2"
+        "mode": "runOnceForAllItems",
+        "language": "python",
+        "pythonCode": "\nimport glob, json, os, subprocess\nitem = _input.first().json\nslug = item[\"slug\"]\nrefs_dir = \"/home/node/files/films/\" + slug + \"/refs\"\nsrcs = sorted(glob.glob(os.path.join(refs_dir, \"original\", \"*\")))\nif not srcs:\n    raise RuntimeError(\"no reference images found in \" + refs_dir + \"/original\")\nnormalized = []\ni = 0\nfor src in srcs:\n    i += 1\n    dst = os.path.join(refs_dir, \"ref_%02d.jpg\" % i)\n    r = subprocess.run([\"ffmpeg\", \"-y\", \"-loglevel\", \"error\", \"-i\", src,\n                        \"-vf\", \"scale='min(1024,iw)':-2\", \"-q:v\", \"4\", dst],\n                       capture_output=True, text=True)\n    ok = r.returncode == 0 and os.path.exists(dst)\n    normalized.append({\"file\": os.path.basename(dst), \"ok\": ok,\n                       \"bytes\": os.path.getsize(dst) if os.path.exists(dst) else 0,\n                       \"err\": (r.stderr or \"\")[-300:] if not ok else \"\"})\nif not any(n[\"ok\"] for n in normalized):\n    raise RuntimeError(\"ffmpeg failed to normalize any reference image: \" + json.dumps(normalized))\nreturn [{\"json\": {\"ok\": True, \"slug\": slug, \"normalized\": normalized}}]\n"
       },
-      "id": "Cmd_NormalizeRefs",
+      "id": "Py_NormalizeRefs",
       "name": "Normalize Refs (FFmpeg)",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         -620,
         300
@@ -108,7 +86,7 @@
             {
               "id": "nextStep",
               "name": "nextStep",
-              "value": "=Project created. Next: open http://localhost:5678/form/film-run-script and enter this slug to generate the script.",
+              "value": "=Project created. Next: POST {\"project_slug\": \"<slug>\"} to http://localhost:5678/webhook/film-run-script to generate the script.",
               "type": "string"
             }
           ]
@@ -126,7 +104,7 @@
     }
   ],
   "connections": {
-    "Project Setup Form": {
+    "Project Setup Hook": {
       "main": [
         [
           {

@@ -3,40 +3,24 @@
   "nodes": [
     {
       "parameters": {
+        "httpMethod": "POST",
         "path": "film-gen-shots",
-        "formTitle": "AI Film — Generate Shot Images",
-        "formDescription": "Character-consistent stills via Gemini. Leave shot ids empty to generate only missing PNGs.",
-        "formFields": {
-          "values": [
-            {
-              "fieldLabel": "Project Slug",
-              "fieldName": "project_slug",
-              "requiredField": true
-            },
-            {
-              "fieldLabel": "Shot IDs to Regenerate (optional)",
-              "fieldName": "regen_ids",
-              "placeholder": "shot_002, shot_005",
-              "requiredField": false
-            }
-          ]
-        },
-        "responseMode": "onReceived",
+        "responseMode": "lastNode",
         "options": {}
       },
-      "id": "Form_Shots",
-      "name": "Shots Form",
-      "type": "n8n-nodes-base.formTrigger",
-      "typeVersion": 2.4,
+      "id": "Hook_Shots",
+      "name": "Shots Hook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
       "position": [
         -1400,
         300
       ],
-      "webhookId": "AE7265D3-5AA0-4A86-88A2-9CC582BCD77D"
+      "webhookId": "860803E1-863F-429F-A42A-8291784D93C1"
     },
     {
       "parameters": {
-        "jsCode": "\nconst slug = ($json.project_slug ?? $json['Project Slug'] ?? '').toString().trim().toLowerCase().replace(/[^a-z0-9-]/g, '');\nif (!slug) throw new Error('Project Slug is required.');\nconst regenRaw = ($json.regen_ids ?? $json['Shot IDs to Regenerate (optional)'] ?? '').toString();\nconst regenIds = regenRaw.split(/[,\\s]+/).map((x) => x.trim().toLowerCase()).filter(Boolean);\nreturn [{ json: { slug, payloadB64: Buffer.from(JSON.stringify({ slug, regen_ids: regenIds })).toString('base64') } }];\n"
+        "jsCode": "\nconst body = $json.body ?? $json;\nconst slug = (body.project_slug ?? '').toString().trim().toLowerCase().replace(/[^a-z0-9-]/g, '');\nif (!slug) throw new Error('project_slug is required in the JSON body.');\nconst regenRaw = (body.regen_ids ?? '').toString();\nconst regenIds = regenRaw.split(/[,\\s]+/).map((x) => x.trim().toLowerCase()).filter(Boolean);\nconst imageModel = (body.image_model ?? '').toString().trim() || 'google/gemini-3.1-flash-image';\nreturn [{ json: { slug, regen_ids: regenIds, image_model: imageModel } }];\n"
       },
       "id": "Code_BuildRequest",
       "name": "Build Request",
@@ -49,23 +33,12 @@
     },
     {
       "parameters": {
-        "command": "python3 - <<'PY'\nimport base64, json, os, sys\nreq = json.loads(base64.b64decode(\"{{ $json.payloadB64 }}\").decode(\"utf-8\"))\nroot = \"/home/node/files/films/\" + req[\"slug\"]\nspath = os.path.join(root, \"script.json\")\nif not os.path.exists(spath):\n    print(json.dumps({\"ok\": False, \"error\": \"no script.json in \" + root + \" — run the Script stage first\"}))\n    sys.exit(1)\nscript = json.load(open(spath))\nregen = set(req.get(\"regen_ids\") or [])\nchars = {c[\"id\"]: c for c in script.get(\"characters\", [])}\nwork = []\nfor scene in script.get(\"scenes\", []):\n    for shot in scene.get(\"shots\", []):\n        sid = shot[\"id\"]\n        if os.path.exists(os.path.join(root, \"shots\", sid + \".png\")) and sid not in regen:\n            continue\n        blocks = []\n        for cid in shot.get(\"characters\", []):\n            c = chars.get(cid)\n            if c:\n                blocks.append({\"id\": cid, \"name\": c.get(\"name\", cid), \"visual_description\": c.get(\"visual_description\", \"\")})\n        work.append({\"id\": sid, \"slug\": req[\"slug\"], \"image_prompt\": shot.get(\"image_prompt\", \"\"),\n                     \"style_notes\": script.get(\"style_notes\", \"\"), \"character_blocks\": blocks})\nprint(json.dumps({\"ok\": True, \"slug\": req[\"slug\"], \"shots\": work}, ensure_ascii=False))\nPY"
+        "mode": "runOnceForAllItems",
+        "language": "python",
+        "pythonCode": "\nimport json, os\nitem = _input.first().json\nslug = item[\"slug\"]\nroot = \"/home/node/files/films/\" + slug\nspath = os.path.join(root, \"script.json\")\nif not os.path.exists(spath):\n    raise RuntimeError(\"no script.json in \" + root + \" — run the Script stage first\")\nwith open(spath) as fh:\n    script = json.load(fh)\nregen = set(item.get(\"regen_ids\") or [])\nchars = {c[\"id\"]: c for c in script.get(\"characters\", [])}\nwork = []\nfor scene in script.get(\"scenes\", []):\n    for shot in scene.get(\"shots\", []):\n        sid = shot[\"id\"]\n        if os.path.exists(os.path.join(root, \"shots\", sid + \".png\")) and sid not in regen:\n            continue\n        blocks = []\n        for cid in shot.get(\"characters\", []):\n            c = chars.get(cid)\n            if c:\n                blocks.append({\"id\": cid, \"name\": c.get(\"name\", cid), \"visual_description\": c.get(\"visual_description\", \"\")})\n        work.append({\"id\": sid, \"slug\": slug, \"image_prompt\": shot.get(\"image_prompt\", \"\"),\n                     \"style_notes\": script.get(\"style_notes\", \"\"), \"character_blocks\": blocks,\n                     \"image_model\": item.get(\"image_model\") or \"google/gemini-3.1-flash-image\"})\nif not work:\n    raise RuntimeError(\"All shot images already exist. Enter shot ids (e.g. shot_002) in the form to force regeneration.\")\nreturn [{\"json\": {\"ok\": True, \"slug\": slug, \"shots\": work}}]\n"
       },
-      "id": "Cmd_LoadPlan",
+      "id": "Py_LoadPlan",
       "name": "Load Shot Plan",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [
-        -880,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "\nconst res = JSON.parse(($json.stdout ?? '').toString().trim());\nif (!res.ok) throw new Error(res.error || 'Failed to load shot plan.');\nif (!res.shots.length) throw new Error('All shot images already exist. Enter shot ids (e.g. shot_002) in the form to force regeneration.');\nreturn [{ json: { slug: res.slug, shots: res.shots } }];\n"
-      },
-      "id": "Code_CheckWork",
-      "name": "Check Work Set",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -89,7 +62,7 @@
     },
     {
       "parameters": {
-        "jsCode": "\nconst shot = $json;\nconst lines = ['Cinematic 16:9 film still, single frame.'];\nif (shot.style_notes) lines.push('Overall style: ' + shot.style_notes);\nfor (const c of (shot.character_blocks ?? [])) {\n  lines.push(c.name + ': ' + c.visual_description + ' Use the attached reference image(s) of ' + c.name + ' and keep facial features, hairstyle, body type, and clothing exactly consistent.');\n}\nlines.push('Scene: ' + shot.image_prompt);\nlines.push('Photorealistic, cinematic lighting. No text, captions, watermarks, or borders.');\nreturn [{ json: {\n  shotId: shot.id,\n  slug: shot.slug,\n  promptB64: Buffer.from(JSON.stringify({ shotId: shot.id, slug: shot.slug, prompt: lines.join('\\n') })).toString('base64'),\n}}];\n"
+        "jsCode": "\nconst shot = $json;\nconst lines = ['Cinematic 16:9 film still, single frame.'];\nif (shot.style_notes) lines.push('Overall style: ' + shot.style_notes);\nfor (const c of (shot.character_blocks ?? [])) {\n  lines.push(c.name + ': ' + c.visual_description + ' Use the attached reference image(s) of ' + c.name + ' and keep facial features, hairstyle, body type, and clothing exactly consistent.');\n}\nlines.push('Scene: ' + shot.image_prompt);\nlines.push('Photorealistic, cinematic lighting. No text, captions, watermarks, or borders.');\nreturn [{ json: { shotId: shot.id, slug: shot.slug, image_model: shot.image_model ?? 'google/gemini-3.1-flash-image', prompt: lines.join('\\n') } }];\n"
       },
       "id": "Code_ShotPrompt",
       "name": "Build Shot Prompt",
@@ -102,12 +75,14 @@
     },
     {
       "parameters": {
-        "command": "python3 - <<'PY'\nimport base64, glob, json, os, sys\nreq = json.loads(base64.b64decode(\"{{ $json.promptB64 }}\").decode(\"utf-8\"))\nroot = \"/home/node/files/films/\" + req[\"slug\"]\nrefs = sorted(glob.glob(os.path.join(root, \"refs\", \"ref_*.jpg\")))\nif not refs:\n    print(json.dumps({\"ok\": False, \"error\": \"no normalized refs in \" + root + \"/refs — re-run Project Setup\"}))\n    sys.exit(1)\nparts = [{\"text\": req[\"prompt\"]}]\nfor p in refs:\n    with open(p, \"rb\") as fh:\n        parts.append({\"inline_data\": {\"mime_type\": \"image/jpeg\", \"data\": base64.b64encode(fh.read()).decode(\"ascii\")}})\nbody = {\n    \"contents\": [{\"role\": \"user\", \"parts\": parts}],\n    \"generationConfig\": {\"responseModalities\": [\"TEXT\", \"IMAGE\"], \"imageConfig\": {\"aspectRatio\": \"16:9\"}},\n}\nprint(json.dumps({\"ok\": True, \"shotId\": req[\"shotId\"], \"body\": body}, separators=(\",\", \":\")))\nPY"
+        "mode": "runOnceForAllItems",
+        "language": "python",
+        "pythonCode": "\nimport base64, glob, json, os\nitem = _input.first().json\nroot = \"/home/node/files/films/\" + item[\"slug\"]\nrefs = sorted(glob.glob(os.path.join(root, \"refs\", \"ref_*.jpg\")))\nif not refs:\n    raise RuntimeError(\"no normalized refs in \" + root + \"/refs — re-run Project Setup\")\nrefs = refs[:3]  # OpenRouter accepts at most 3 input_references per request\nref_parts = []\nfor p in refs:\n    with open(p, \"rb\") as fh:\n        data_url = \"data:image/jpeg;base64,\" + base64.b64encode(fh.read()).decode(\"ascii\")\n    ref_parts.append({\"type\": \"image_url\", \"image_url\": {\"url\": data_url}})\nbody = {\"model\": item.get(\"image_model\") or \"google/gemini-3.1-flash-image\",\n        \"prompt\": item[\"prompt\"], \"aspect_ratio\": \"16:9\",\n        \"input_references\": ref_parts}\nreturn [{\"json\": {\"shotId\": item[\"shotId\"], \"slug\": item[\"slug\"], \"body\": body}}]\n"
       },
-      "id": "Cmd_GeminiBody",
-      "name": "Build Gemini Request",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
+      "id": "Py_ImageBody",
+      "name": "Build Image Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         -100,
         300
@@ -116,18 +91,18 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent",
+        "url": "https://openrouter.ai/api/v1/images",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googlePalmApi",
+        "nodeCredentialType": "openRouterApi",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.parse($json.stdout).body }}",
+        "jsonBody": "={{ $json.body }}",
         "options": {
-          "timeout": 120000
+          "timeout": 180000
         }
       },
-      "id": "Http_Gemini",
-      "name": "Gemini Image",
+      "id": "Http_Image",
+      "name": "OpenRouter Image",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
@@ -135,9 +110,9 @@
         300
       ],
       "credentials": {
-        "googlePalmApi": {
-          "id": "GEMINI_CRED_ID",
-          "name": "Google Gemini(PaLM) Api"
+        "openRouterApi": {
+          "id": "CrCtPveFpgBQ5Pir",
+          "name": "OpenRouter account"
         }
       },
       "retryOnFail": true,
@@ -146,10 +121,10 @@
     },
     {
       "parameters": {
-        "jsCode": "\nconst srcs = $('Build Gemini Request').all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json ?? {};\n  let shotId = '';\n  try { shotId = JSON.parse(srcs[i].json.stdout).shotId; } catch (e) {}\n  const cands = Array.isArray(resp.candidates) ? resp.candidates : [];\n  let img = null;\n  for (const c of cands) {\n    const parts = (c.content && Array.isArray(c.content.parts)) ? c.content.parts : [];\n    for (const part of parts) {\n      if (part.inlineData && part.inlineData.data) { img = part.inlineData.data; break; }\n    }\n    if (img) break;\n  }\n  if (!img) {\n    const reason = (resp.promptFeedback && resp.promptFeedback.blockReason)\n      || (cands[0] && cands[0].finishReason)\n      || 'no image part in Gemini response';\n    throw new Error('Shot ' + (shotId || ('#' + i)) + ' failed: ' + reason);\n  }\n  const slug = $('Build Shot Prompt').all()[i].json.slug;\n  const destDir = '/home/node/files/films/' + slug + '/shots';\n  const destPath = destDir + '/' + shotId + '.png';\n  const SIZE = 60000;\n  const nChunks = Math.max(1, Math.ceil(img.length / SIZE));\n  for (let s = 0; s < nChunks; s++) {\n    out.push({ json: {\n      fileId: slug + '_' + shotId, destDir, destPath, seq: s,\n      isLast: (s === nChunks - 1) ? 1 : 0,\n      chunkB64: img.slice(s * SIZE, (s + 1) * SIZE),\n    }});\n  }\n}\nreturn out;\n"
+        "jsCode": "\nconst srcs = $('Build Image Request').all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json ?? {};\n  const src = srcs[i] ? srcs[i].json : {};\n  const shotId = src.shotId ?? ('unknown_' + i);\n  const slug = src.slug;\n  const arr = Array.isArray(resp.data) ? resp.data : [];\n  const img = arr.find((d) => d && d.b64_json);\n  if (!img) {\n    const reason = (resp.error && (resp.error.message || resp.error.code))\n      || (resp.choices && resp.choices[0] && resp.choices[0].message && resp.choices[0].message.content)\n      || 'no image in OpenRouter response';\n    throw new Error('Shot ' + shotId + ' failed: ' + String(reason).slice(0, 300));\n  }\n  out.push({ json: { slug, shotId, imageB64: img.b64_json } });\n}\nreturn out;\n"
       },
-      "id": "Code_ExtractChunk",
-      "name": "Extract Image & Chunk",
+      "id": "Code_Extract",
+      "name": "Extract Image",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -159,40 +134,16 @@
     },
     {
       "parameters": {
-        "command": "TMP=\"/tmp/n8nfilm_{{ $json.fileId }}.b64\"\nif [ \"{{ $json.seq }}\" = \"0\" ]; then : > \"$TMP\"; fi\nprintf '%s' '{{ $json.chunkB64 }}' >> \"$TMP\"\nif [ \"{{ $json.isLast }}\" = \"1\" ]; then\n  mkdir -p \"{{ $json.destDir }}\"\n  python3 -c \"import base64; open('{{ $json.destPath }}','wb').write(base64.b64decode(open('$TMP').read()))\" && rm -f \"$TMP\" && echo \"saved {{ $json.destPath }}\"\nfi"
+        "mode": "runOnceForAllItems",
+        "language": "python",
+        "pythonCode": "\nimport base64, datetime, glob, json, os, subprocess\nitems = _input.all()\nif not items:\n    raise RuntimeError(\"no generated images received\")\nslugs = []\nfor it in items:\n    d = it.json\n    shots_dir = \"/home/node/files/films/\" + d[\"slug\"] + \"/shots\"\n    os.makedirs(shots_dir, exist_ok=True)\n    with open(os.path.join(shots_dir, d[\"shotId\"] + \".png\"), \"wb\") as fh:\n        fh.write(base64.b64decode(d[\"imageB64\"]))\n    if d[\"slug\"] not in slugs:\n        slugs.append(d[\"slug\"])\nresults = []\nfor slug in slugs:\n    root = \"/home/node/files/films/\" + slug\n    shots_dir = os.path.join(root, \"shots\")\n    pngs = sorted(glob.glob(os.path.join(shots_dir, \"shot_*.png\")))\n    html = [\"<!doctype html><html><head><meta charset='utf-8'><title>\" + slug + \" shots</title></head>\",\n            \"<body style=\\\"background:#141414;color:#eee;font-family:system-ui,sans-serif;padding:24px\\\">\",\n            \"<h1>\" + slug + \" — shot stills</h1><div>\"]\n    for p in pngs:\n        f = os.path.basename(p)\n        html.append(\"<figure style=\\\"display:inline-block;margin:10px\\\"><img src=\\\"\" + f + \"\\\" width=\\\"420\\\" style=\\\"border-radius:6px;display:block\\\"><figcaption style=\\\"color:#999;font-size:12px\\\">\" + f + \"</figcaption></figure>\")\n    html.append(\"</div></body></html>\")\n    with open(os.path.join(shots_dir, \"index.html\"), \"w\") as fh:\n        fh.write(\"\\n\".join(html))\n    r = subprocess.run([\"ffmpeg\", \"-y\", \"-loglevel\", \"error\", \"-pattern_type\", \"glob\",\n                        \"-i\", os.path.join(shots_dir, \"shot_*.png\"),\n                        \"-vf\", \"scale=480:270,tile=4\", \"-frames:v\", \"1\",\n                        os.path.join(shots_dir, \"contact_sheet.jpg\")], capture_output=True, text=True)\n    now = datetime.datetime.utcnow().isoformat() + \"Z\"\n    pf = os.path.join(root, \"project.json\")\n    proj = json.load(open(pf)) if os.path.exists(pf) else {}\n    proj.update({\"status\": \"images_ready\", \"updated_at\": now})\n    proj.setdefault(\"stages\", {})[\"images\"] = {\"status\": \"done\", \"done_at\": now, \"count\": len(pngs)}\n    with open(pf, \"w\") as fh:\n        json.dump(proj, fh, indent=2, ensure_ascii=False)\n    results.append({\"slug\": slug, \"shot_count\": len(pngs), \"contact_sheet\": r.returncode == 0,\n                    \"sheet_err\": (r.stderr or \"\")[-200:] if r.returncode != 0 else \"\"})\nreturn [{\"json\": {\"ok\": True, \"slug\": slugs[0], \"results\": results}}]\n"
       },
-      "id": "Cmd_WritePng",
-      "name": "Write Shot PNG",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [
-        680,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "\nconst slug = $('Build Shot Prompt').first().json.slug;\nreturn [{ json: { slug, payloadB64: Buffer.from(JSON.stringify({ slug })).toString('base64') } }];\n"
-      },
-      "id": "Code_SheetPlan",
-      "name": "Build Sheet Plan",
+      "id": "Py_WriteShots",
+      "name": "Write Shots & Contact Sheet",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        940,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "command": "python3 - <<'PY'\nimport base64, datetime, glob, json, os\nreq = json.loads(base64.b64decode(\"{{ $('Build Sheet Plan').first().json.payloadB64 }}\").decode(\"utf-8\"))\nroot = \"/home/node/files/films/\" + req[\"slug\"]\nshots_dir = os.path.join(root, \"shots\")\npngs = sorted(glob.glob(os.path.join(shots_dir, \"shot_*.png\")))\nhtml = [\"<!doctype html><html><head><meta charset='utf-8'><title>\" + req[\"slug\"] + \" shots</title></head>\",\n        \"<body style=\\\"background:#141414;color:#eee;font-family:system-ui,sans-serif;padding:24px\\\">\",\n        \"<h1>\" + req[\"slug\"] + \" — shot stills</h1><div>\"]\nfor p in pngs:\n    f = os.path.basename(p)\n    html.append(\"<figure style=\\\"display:inline-block;margin:10px\\\"><img src=\\\"\" + f + \"\\\" width=\\\"420\\\" style=\\\"border-radius:6px;display:block\\\"><figcaption style=\\\"color:#999;font-size:12px\\\">\" + f + \"</figcaption></figure>\")\nhtml.append(\"</div></body></html>\")\nwith open(os.path.join(shots_dir, \"index.html\"), \"w\") as fh:\n    fh.write(\"\\n\".join(html))\nnow = datetime.datetime.utcnow().isoformat() + \"Z\"\npf = os.path.join(root, \"project.json\")\nproj = json.load(open(pf)) if os.path.exists(pf) else {}\nproj.update({\"status\": \"images_ready\", \"updated_at\": now})\nproj.setdefault(\"stages\", {})[\"images\"] = {\"status\": \"done\", \"done_at\": now, \"count\": len(pngs)}\nwith open(pf, \"w\") as fh:\n    json.dump(proj, fh, indent=2, ensure_ascii=False)\nprint(json.dumps({\"ok\": True, \"shot_count\": len(pngs)}))\nPY\nif ls \"/home/node/files/films/{{ $('Build Sheet Plan').first().json.slug }}/shots/\"shot_*.png >/dev/null 2>&1; then\n  ffmpeg -y -loglevel error -pattern_type glob -i \"/home/node/files/films/{{ $('Build Sheet Plan').first().json.slug }}/shots/shot_*.png\" -vf \"scale=480:270,tile=4\" -frames:v 1 \"/home/node/files/films/{{ $('Build Sheet Plan').first().json.slug }}/shots/contact_sheet.jpg\" || echo \"contact sheet skipped\"\nfi\necho done"
-      },
-      "id": "Cmd_Sheet",
-      "name": "Build Contact Sheet",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [
-        1200,
+        420,
         300
       ]
     },
@@ -215,7 +166,7 @@
             {
               "id": "nextStep",
               "name": "nextStep",
-              "value": "=Open shots/index.html to review. Delete bad PNGs or list their ids in the Shots form to regenerate. Then generate voiceover at http://localhost:5678/form/film-gen-voice.",
+              "value": "=Open shots/index.html to review. Delete bad PNGs, then re-POST to http://localhost:5678/webhook/film-gen-shots with {\"project_slug\": \"<slug>\", \"regen_ids\": \"shot_002\"}. Or POST to http://localhost:5678/webhook/film-gen-voice for voiceover.",
               "type": "string"
             }
           ]
@@ -227,13 +178,13 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        1460,
+        680,
         300
       ]
     }
   ],
   "connections": {
-    "Shots Form": {
+    "Shots Hook": {
       "main": [
         [
           {
@@ -259,17 +210,6 @@
       "main": [
         [
           {
-            "node": "Check Work Set",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Check Work Set": {
-      "main": [
-        [
-          {
             "node": "Split Shots",
             "type": "main",
             "index": 0
@@ -292,69 +232,47 @@
       "main": [
         [
           {
-            "node": "Build Gemini Request",
+            "node": "Build Image Request",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Build Gemini Request": {
+    "Build Image Request": {
       "main": [
         [
           {
-            "node": "Gemini Image",
+            "node": "OpenRouter Image",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Gemini Image": {
+    "OpenRouter Image": {
       "main": [
         [
           {
-            "node": "Extract Image & Chunk",
+            "node": "Extract Image",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Extract Image & Chunk": {
+    "Extract Image": {
       "main": [
         [
           {
-            "node": "Write Shot PNG",
+            "node": "Write Shots & Contact Sheet",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Write Shot PNG": {
-      "main": [
-        [
-          {
-            "node": "Build Sheet Plan",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build Sheet Plan": {
-      "main": [
-        [
-          {
-            "node": "Build Contact Sheet",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build Contact Sheet": {
+    "Write Shots & Contact Sheet": {
       "main": [
         [
           {

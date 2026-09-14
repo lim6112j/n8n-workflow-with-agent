@@ -3,106 +3,24 @@
   "nodes": [
     {
       "parameters": {
+        "httpMethod": "POST",
         "path": "film-assemble",
-        "formTitle": "AI Film — Final Assembly",
-        "formDescription": "Ken Burns motion per shot, concat, subtitles, optional music bed → film.mp4",
-        "formFields": {
-          "values": [
-            {
-              "fieldLabel": "Project Slug",
-              "fieldName": "project_slug",
-              "requiredField": true
-            },
-            {
-              "fieldLabel": "Burn Subtitles",
-              "fieldName": "burn_subs",
-              "fieldType": "dropdown",
-              "fieldOptions": {
-                "values": [
-                  {
-                    "option": "yes"
-                  },
-                  {
-                    "option": "no"
-                  }
-                ]
-              },
-              "requiredField": true
-            },
-            {
-              "fieldLabel": "Subtitle Font Size",
-              "fieldName": "subtitle_font_size",
-              "fieldType": "dropdown",
-              "fieldOptions": {
-                "values": [
-                  {
-                    "option": "18"
-                  },
-                  {
-                    "option": "22"
-                  },
-                  {
-                    "option": "24"
-                  },
-                  {
-                    "option": "28"
-                  },
-                  {
-                    "option": "32"
-                  }
-                ]
-              },
-              "requiredField": true
-            },
-            {
-              "fieldLabel": "Music File (optional, inside music/)",
-              "fieldName": "music_file",
-              "placeholder": "music.mp3",
-              "requiredField": false
-            },
-            {
-              "fieldLabel": "Music Volume",
-              "fieldName": "music_volume",
-              "fieldType": "dropdown",
-              "fieldOptions": {
-                "values": [
-                  {
-                    "option": "0.05"
-                  },
-                  {
-                    "option": "0.1"
-                  },
-                  {
-                    "option": "0.15"
-                  },
-                  {
-                    "option": "0.25"
-                  },
-                  {
-                    "option": "0.4"
-                  }
-                ]
-              },
-              "requiredField": false
-            }
-          ]
-        },
-        "responseMode": "onReceived",
+        "responseMode": "lastNode",
         "options": {}
       },
-      "id": "Form_Assemble",
-      "name": "Assemble Form",
-      "type": "n8n-nodes-base.formTrigger",
-      "typeVersion": 2.4,
+      "id": "Hook_Assemble",
+      "name": "Assemble Hook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
       "position": [
         -1400,
         300
       ],
-      "webhookId": "335E4A75-638A-48F8-9B4F-6D795A7A34E7"
+      "webhookId": "78BDB8F2-DB58-4665-A77D-F913D3D2FFE5"
     },
     {
       "parameters": {
-        "jsCode": "\nconst slug = ($json.project_slug ?? $json['Project Slug'] ?? '').toString().trim().toLowerCase().replace(/[^a-z0-9-]/g, '');\nif (!slug) throw new Error('Project Slug is required.');\nconst burnRaw = ($json.burn_subs ?? $json['Burn Subtitles'] ?? 'yes').toString();\nconst fontRaw = Number($json.subtitle_font_size ?? $json['Subtitle Font Size'] ?? 24);\nconst volRaw = Number($json.music_volume ?? $json['Music Volume'] ?? 0.15);\nconst opts = {\n  slug,\n  burn_subs: burnRaw === 'yes',\n  font_size: Math.min(64, Math.max(10, Number.isFinite(fontRaw) && fontRaw > 0 ? fontRaw : 24)),\n  music_file: ($json.music_file ?? $json['Music File (optional, inside music/)'] ?? '').toString(),\n  music_volume: Number.isFinite(volRaw) && volRaw > 0 ? volRaw : 0.15,\n};\nreturn [{ json: { slug, payloadB64: Buffer.from(JSON.stringify(opts)).toString('base64') } }];\n"
+        "jsCode": "\nconst body = $json.body ?? $json;\nconst slug = (body.project_slug ?? '').toString().trim().toLowerCase().replace(/[^a-z0-9-]/g, '');\nif (!slug) throw new Error('project_slug is required in the JSON body.');\nconst burnRaw = (body.burn_subs ?? 'yes').toString();\nconst fontRaw = Number(body.subtitle_font_size ?? 24);\nconst volRaw = Number(body.music_volume ?? 0.15);\nreturn [{ json: {\n  slug,\n  burn_subs: burnRaw === 'yes',\n  font_size: Math.min(64, Math.max(10, Number.isFinite(fontRaw) && fontRaw > 0 ? fontRaw : 24)),\n  music_file: (body.music_file ?? '').toString(),\n  music_volume: Number.isFinite(volRaw) && volRaw > 0 ? volRaw : 0.15,\n}}];\n"
       },
       "id": "Code_BuildRequest",
       "name": "Build Request",
@@ -115,12 +33,14 @@
     },
     {
       "parameters": {
-        "command": "python3 - <<'PY'\nimport base64, json, os, subprocess, sys\nreq = json.loads(base64.b64decode(\"{{ $json.payloadB64 }}\").decode(\"utf-8\"))\nroot = \"/home/node/files/films/\" + req[\"slug\"]\nscript = json.load(open(os.path.join(root, \"script.json\")))\nfps = int(script.get(\"fps\", 25))\nchars = {c[\"id\"]: c for c in script.get(\"characters\", [])}\nmotion_cycle = [\"zoom_in\", \"zoom_out\", \"pan_left\", \"pan_right\"]\nplan_shots = []\nk = 0\nfor scene in script.get(\"scenes\", []):\n    for shot in scene.get(\"shots\", []):\n        sid = shot[\"id\"]\n        png = os.path.join(root, \"shots\", sid + \".png\")\n        aud = os.path.join(root, \"audio\", sid + \".mp3\")\n        if not os.path.exists(png):\n            raise SystemExit(\"missing \" + png + \" — run the Shot Images stage first\")\n        if not os.path.exists(aud):\n            raise SystemExit(\"missing \" + aud + \" — run the Voiceover stage first\")\n        p = subprocess.run([\"ffprobe\", \"-v\", \"error\", \"-show_entries\", \"format=duration\", \"-of\", \"csv=p=0\", aud],\n                           capture_output=True, text=True, check=True)\n        dur = float(p.stdout.strip())\n        m = shot.get(\"motion\")\n        if m not in motion_cycle:\n            m = motion_cycle[k % 4]\n        if shot.get(\"narration\"):\n            sub = shot[\"narration\"].strip()\n        else:\n            sub = \"\\n\".join(\n                (chars.get(d.get(\"character\", \"\"), {}).get(\"name\") or d.get(\"character\") or \"?\") + \": \" + d.get(\"text\", \"\")\n                for d in shot.get(\"dialogue\") or []\n            )\n        plan_shots.append({\"id\": sid, \"dur\": round(dur, 3), \"frames\": max(2, round(dur * fps)), \"motion\": m, \"subtext\": sub})\n        k += 1\nprint(json.dumps({\"ok\": True, \"slug\": req[\"slug\"], \"fps\": fps, \"burn_subs\": bool(req.get(\"burn_subs\")),\n                  \"font_size\": req.get(\"font_size\", 24), \"music_file\": req.get(\"music_file\") or \"\",\n                  \"music_volume\": req.get(\"music_volume\", 0.15), \"shots\": plan_shots}, ensure_ascii=False))\nPY"
+        "mode": "runOnceForAllItems",
+        "language": "python",
+        "pythonCode": "\nimport json, os, subprocess\nitem = _input.first().json\nslug = item[\"slug\"]\nroot = \"/home/node/files/films/\" + slug\nwith open(os.path.join(root, \"script.json\")) as fh:\n    script = json.load(fh)\nfps = int(script.get(\"fps\", 25))\nchars = {c[\"id\"]: c for c in script.get(\"characters\", [])}\nmotion_cycle = [\"zoom_in\", \"zoom_out\", \"pan_left\", \"pan_right\"]\nplan_shots = []\nk = 0\nfor scene in script.get(\"scenes\", []):\n    for shot in scene.get(\"shots\", []):\n        sid = shot[\"id\"]\n        png = os.path.join(root, \"shots\", sid + \".png\")\n        aud = os.path.join(root, \"audio\", sid + \".mp3\")\n        if not os.path.exists(png):\n            raise RuntimeError(\"missing \" + png + \" — run the Shot Images stage first\")\n        if not os.path.exists(aud):\n            raise RuntimeError(\"missing \" + aud + \" — run the Voiceover stage first\")\n        pr = subprocess.run([\"ffprobe\", \"-v\", \"error\", \"-show_entries\", \"format=duration\", \"-of\", \"csv=p=0\", aud],\n                            capture_output=True, text=True, check=True)\n        dur = float(pr.stdout.strip())\n        m = shot.get(\"motion\")\n        if m not in motion_cycle:\n            m = motion_cycle[k % 4]\n        if shot.get(\"narration\"):\n            sub = shot[\"narration\"].strip()\n        else:\n            sub = \"\\n\".join(\n                (chars.get(d.get(\"character\", \"\"), {}).get(\"name\") or d.get(\"character\") or \"?\") + \": \" + d.get(\"text\", \"\")\n                for d in shot.get(\"dialogue\") or []\n            )\n        plan_shots.append({\"id\": sid, \"dur\": round(dur, 3), \"frames\": max(2, round(dur * fps)), \"motion\": m, \"subtext\": sub})\n        k += 1\nreturn [{\"json\": {\"ok\": True, \"slug\": slug, \"fps\": fps, \"burn_subs\": bool(item.get(\"burn_subs\")),\n                  \"font_size\": item.get(\"font_size\", 24), \"music_file\": item.get(\"music_file\") or \"\",\n                  \"music_volume\": item.get(\"music_volume\", 0.15), \"shots\": plan_shots}}]\n"
       },
-      "id": "Cmd_Plan",
+      "id": "Py_Plan",
       "name": "Plan Render",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         -880,
         300
@@ -128,10 +48,12 @@
     },
     {
       "parameters": {
-        "jsCode": "const raw = ($json.stdout ?? '').toString().trim();\nJSON.parse(raw);\nreturn [{ json: { payloadB64: Buffer.from(raw).toString('base64') } }];\n"
+        "mode": "runOnceForAllItems",
+        "language": "python",
+        "pythonCode": "\nimport json, os, subprocess\nplan = _input.first().json\nroot = \"/home/node/files/films/\" + plan[\"slug\"]\nfps = int(plan[\"fps\"])\nos.makedirs(os.path.join(root, \"render\"), exist_ok=True)\nzoom_expr = {\n    \"zoom_in\": \"min(1.0+0.10*on/{F},1.10)\",\n    \"zoom_out\": \"max(1.10-0.10*on/{F},1.0)\",\n    \"pan_left\": \"1.08\",\n    \"pan_right\": \"1.08\",\n}\nrendered = []\nfor shot in plan[\"shots\"]:\n    sid = shot[\"id\"]\n    F = int(shot[\"frames\"])\n    z = zoom_expr[shot[\"motion\"]].replace(\"{F}\", str(F))\n    if shot[\"motion\"] in (\"zoom_in\", \"zoom_out\"):\n        x = \"iw/2-(iw/zoom/2)\"\n        y = \"ih/2-(ih/zoom/2)\"\n    elif shot[\"motion\"] == \"pan_left\":\n        x = \"(iw-iw/zoom)*on/\" + str(F)\n        y = \"(ih-ih/zoom)/2\"\n    else:\n        x = \"(iw-iw/zoom)*(1-on/\" + str(F) + \")\"\n        y = \"(ih-ih/zoom)/2\"\n    vf = (\"[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,scale=3840:2160,\"\n          \"zoompan=z='\" + z + \"':x='\" + x + \"':y='\" + y + \"':d=\" + str(F) + \":s=1920x1080:fps=\" + str(fps) + \",format=yuv420p[v]\")\n    outp = os.path.join(root, \"render\", sid + \".mp4\")\n    cmd = [\"ffmpeg\", \"-y\", \"-loglevel\", \"error\",\n           \"-i\", os.path.join(root, \"shots\", sid + \".png\"),\n           \"-i\", os.path.join(root, \"audio\", sid + \".mp3\"),\n           \"-filter_complex\", vf,\n           \"-map\", \"[v]\", \"-map\", \"1:a\",\n           \"-c:v\", \"libx264\", \"-preset\", \"veryfast\", \"-crf\", \"18\", \"-pix_fmt\", \"yuv420p\",\n           \"-c:a\", \"aac\", \"-b:a\", \"192k\",\n           \"-shortest\", \"-t\", \"%.3f\" % shot[\"dur\"],\n           outp]\n    subprocess.run(cmd, check=True)\n    rendered.append(sid)\nreturn [{\"json\": {\"ok\": True, \"slug\": plan[\"slug\"], \"clips\": len(rendered)}}]\n"
       },
-      "id": "Code_PayloadClips",
-      "name": "Plan → Clips Payload",
+      "id": "Py_Clips",
+      "name": "Render Shot Clips",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -141,23 +63,12 @@
     },
     {
       "parameters": {
-        "command": "python3 - <<'PY'\nimport base64, json, os, subprocess\nplan = json.loads(base64.b64decode(\"{{ $json.payloadB64 }}\").decode(\"utf-8\"))\nroot = \"/home/node/files/films/\" + plan[\"slug\"]\nfps = int(plan[\"fps\"])\nos.makedirs(os.path.join(root, \"render\"), exist_ok=True)\nzoom_expr = {\n    \"zoom_in\": \"min(1.0+0.10*on/{F},1.10)\",\n    \"zoom_out\": \"max(1.10-0.10*on/{F},1.0)\",\n    \"pan_left\": \"1.08\",\n    \"pan_right\": \"1.08\",\n}\nfor shot in plan[\"shots\"]:\n    sid = shot[\"id\"]\n    F = int(shot[\"frames\"])\n    z = zoom_expr[shot[\"motion\"]].replace(\"{F}\", str(F))\n    if shot[\"motion\"] in (\"zoom_in\", \"zoom_out\"):\n        x = \"iw/2-(iw/zoom/2)\"\n        y = \"ih/2-(ih/zoom/2)\"\n    elif shot[\"motion\"] == \"pan_left\":\n        x = \"(iw-iw/zoom)*on/\" + str(F)\n        y = \"(ih-ih/zoom)/2\"\n    else:\n        x = \"(iw-iw/zoom)*(1-on/\" + str(F) + \")\"\n        y = \"(ih-ih/zoom)/2\"\n    vf = (\"[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,scale=3840:2160,\"\n          \"zoompan=z='\" + z + \"':x='\" + x + \"':y='\" + y + \"':d=\" + str(F) + \":s=1920x1080:fps=\" + str(fps) + \",format=yuv420p[v]\")\n    outp = os.path.join(root, \"render\", sid + \".mp4\")\n    cmd = [\"ffmpeg\", \"-y\", \"-loglevel\", \"error\",\n           \"-i\", os.path.join(root, \"shots\", sid + \".png\"),\n           \"-i\", os.path.join(root, \"audio\", sid + \".mp3\"),\n           \"-filter_complex\", vf,\n           \"-map\", \"[v]\", \"-map\", \"1:a\",\n           \"-c:v\", \"libx264\", \"-preset\", \"veryfast\", \"-crf\", \"18\", \"-pix_fmt\", \"yuv420p\",\n           \"-c:a\", \"aac\", \"-b:a\", \"192k\",\n           \"-shortest\", \"-t\", \"%.3f\" % shot[\"dur\"],\n           outp]\n    subprocess.run(cmd, check=True)\n    print(\"rendered\", sid)\nprint(json.dumps({\"ok\": True, \"clips\": len(plan[\"shots\"])}))\nPY"
+        "mode": "runOnceForAllItems",
+        "language": "python",
+        "pythonCode": "\nimport json, os, subprocess\nplan = _input.first().json\nroot = \"/home/node/files/films/\" + plan[\"slug\"]\nrdir = os.path.join(root, \"render\")\nlst = os.path.join(rdir, \"list.txt\")\nwith open(lst, \"w\") as fh:\n    for shot in plan[\"shots\"]:\n        fh.write(\"file '\" + shot[\"id\"] + \".mp4'\\n\")\nsubprocess.run([\"ffmpeg\", \"-y\", \"-loglevel\", \"error\", \"-f\", \"concat\", \"-safe\", \"0\", \"-i\", \"list.txt\",\n                \"-c\", \"copy\", \"concat.mp4\"], cwd=rdir, check=True)\nreturn [{\"json\": plan}]\n"
       },
-      "id": "Cmd_Clips",
-      "name": "Render Shot Clips",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [
-        -360,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const raw = ($json.stdout ?? '').toString().trim();\nJSON.parse(raw);\nreturn [{ json: { payloadB64: Buffer.from(raw).toString('base64') } }];\n"
-      },
-      "id": "Code_PayloadConcat",
-      "name": "Clips → Concat Payload",
+      "id": "Py_Concat",
+      "name": "Concat Clips",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -167,12 +78,12 @@
     },
     {
       "parameters": {
-        "command": "python3 - <<'PY'\nimport base64, json, os, subprocess\nplan = json.loads(base64.b64decode(\"{{ $json.payloadB64 }}\").decode(\"utf-8\"))\nroot = \"/home/node/files/films/\" + plan[\"slug\"]\nrdir = os.path.join(root, \"render\")\nlst = os.path.join(rdir, \"list.txt\")\nwith open(lst, \"w\") as fh:\n    for shot in plan[\"shots\"]:\n        fh.write(\"file '\" + shot[\"id\"] + \".mp4'\\n\")\nsubprocess.run([\"ffmpeg\", \"-y\", \"-loglevel\", \"error\", \"-f\", \"concat\", \"-safe\", \"0\", \"-i\", \"list.txt\",\n                \"-c\", \"copy\", \"concat.mp4\"], cwd=rdir, check=True)\nprint(json.dumps({\"ok\": True, \"clips\": len(plan[\"shots\"])}))\nPY"
+        "jsCode": "\nconst plan = $json;\nfunction srtTime(sec) {\n  const ms = Math.max(0, Math.round(sec * 1000));\n  const h = Math.floor(ms / 3600000);\n  const m = Math.floor((ms % 3600000) / 60000);\n  const s = Math.floor((ms % 60000) / 1000);\n  const milli = ms % 1000;\n  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(milli).padStart(3, '0')}`;\n}\nlet t = 0;\nconst cues = [];\nfor (const shot of plan.shots) {\n  const start = t;\n  const end = t + shot.dur;\n  t = end;\n  const text = (shot.subtext ?? '').toString().trim();\n  if (!text) continue;\n  cues.push(`${cues.length + 1}\\n${srtTime(start)} --> ${srtTime(end)}\\n${text}\\n`);\n}\nreturn [{ json: { slug: plan.slug, plan, srt: cues.join('\\n') } }];\n"
       },
-      "id": "Cmd_Concat",
-      "name": "Concat Clips",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
+      "id": "Code_SRT",
+      "name": "Build SRT",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         -100,
         300
@@ -180,53 +91,16 @@
     },
     {
       "parameters": {
-        "jsCode": "\nconst plan = JSON.parse($('Plan Render').first().json.stdout.trim());\nfunction srtTime(sec) {\n  const ms = Math.max(0, Math.round(sec * 1000));\n  const h = Math.floor(ms / 3600000);\n  const m = Math.floor((ms % 3600000) / 60000);\n  const s = Math.floor((ms % 60000) / 1000);\n  const milli = ms % 1000;\n  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(milli).padStart(3, '0')}`;\n}\nlet t = 0;\nconst cues = [];\nfor (const shot of plan.shots) {\n  const start = t;\n  const end = t + shot.dur;\n  t = end;\n  const text = (shot.subtext ?? '').toString().trim();\n  if (!text) continue;\n  cues.push(`${cues.length + 1}\\n${srtTime(start)} --> ${srtTime(end)}\\n${text}\\n`);\n}\nconst srt = cues.join('\\n');\nconst slug = plan.slug;\nconst destDir = '/home/node/files/films/' + slug;\nconst destPath = destDir + '/subs.srt';\nconst b64 = Buffer.from(srt, 'utf8').toString('base64');\nconst SIZE = 60000;\nconst nChunks = Math.max(1, Math.ceil(b64.length / SIZE));\nconst out = [];\nfor (let s = 0; s < nChunks; s++) {\n  out.push({ json: {\n    fileId: slug + '_subs', destDir, destPath, seq: s,\n    isLast: (s === nChunks - 1) ? 1 : 0,\n    chunkB64: b64.slice(s * SIZE, (s + 1) * SIZE),\n  }});\n}\nreturn out;\n"
+        "mode": "runOnceForAllItems",
+        "language": "python",
+        "pythonCode": "\nimport base64, datetime, json, os, subprocess\nitem = _input.first().json\nplan = item[\"plan\"]\nslug = item[\"slug\"]\nroot = \"/home/node/files/films/\" + slug\nwith open(os.path.join(root, \"subs.srt\"), \"w\", encoding=\"utf-8\") as fh:\n    fh.write(item[\"srt\"])\nconcat = os.path.join(root, \"render\", \"concat.mp4\")\nfilm = os.path.join(root, \"film.mp4\")\nvf = \"[0:v]format=yuv420p[v]\"\nif plan.get(\"burn_subs\"):\n    style = \"FontSize=%d,Outline=1,Shadow=0,MarginV=28\" % int(plan.get(\"font_size\") or 24)\n    vf = \"[0:v]subtitles=\" + os.path.join(root, \"subs.srt\") + \":force_style='\" + style + \"',format=yuv420p[v]\"\nargs = [\"ffmpeg\", \"-y\", \"-loglevel\", \"error\", \"-i\", concat]\nmusic = (plan.get(\"music_file\") or \"\").strip()\nif music:\n    mp = music if os.path.isabs(music) else os.path.join(root, \"music\", os.path.basename(music))\n    if not os.path.exists(mp):\n        raise RuntimeError(\"music file not found: \" + mp)\n    args += [\"-stream_loop\", \"-1\", \"-i\", mp]\n    vol = plan.get(\"music_volume\", 0.15)\n    fc = vf + \";[1:a]volume=\" + str(vol) + \"[m];[0:a][m]amix=inputs=2:duration=first:dropout_transition=0[a]\"\n    args += [\"-filter_complex\", fc, \"-map\", \"0:v\", \"-map\", \"[a]\"]\nelse:\n    args += [\"-filter_complex\", vf, \"-map\", \"0:v\", \"-map\", \"0:a\"]\nargs += [\"-c:v\", \"libx264\", \"-preset\", \"medium\", \"-crf\", \"18\",\n         \"-c:a\", \"aac\", \"-b:a\", \"192k\", \"-movflags\", \"+faststart\", film]\nsubprocess.run(args, check=True)\npr = subprocess.run([\"ffprobe\", \"-v\", \"error\", \"-show_entries\", \"format=duration,size\", \"-of\", \"json\", film],\n                    capture_output=True, text=True, check=True)\nmeta = json.loads(pr.stdout)\nnow = datetime.datetime.utcnow().isoformat() + \"Z\"\npf = os.path.join(root, \"project.json\")\nproj = json.load(open(pf)) if os.path.exists(pf) else {}\nproj.update({\"status\": \"rendered\", \"updated_at\": now})\nproj.setdefault(\"stages\", {})[\"assembly\"] = {\"status\": \"done\", \"done_at\": now}\nwith open(pf, \"w\") as fh:\n    json.dump(proj, fh, indent=2, ensure_ascii=False)\nreturn [{\"json\": {\"ok\": True, \"film\": film, \"duration\": round(float(meta[\"format\"][\"duration\"]), 2),\n                  \"size_mb\": round(int(meta[\"format\"][\"size\"]) / 1048576, 2)}}]\n"
       },
-      "id": "Code_SRT",
-      "name": "Build SRT & Chunk",
+      "id": "Py_Mix",
+      "name": "Write Subs & Mix Final",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         160,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "command": "TMP=\"/tmp/n8nfilm_{{ $json.fileId }}.b64\"\nif [ \"{{ $json.seq }}\" = \"0\" ]; then : > \"$TMP\"; fi\nprintf '%s' '{{ $json.chunkB64 }}' >> \"$TMP\"\nif [ \"{{ $json.isLast }}\" = \"1\" ]; then\n  mkdir -p \"{{ $json.destDir }}\"\n  python3 -c \"import base64; open('{{ $json.destPath }}','wb').write(base64.b64decode(open('$TMP').read()))\" && rm -f \"$TMP\" && echo \"saved {{ $json.destPath }}\"\nfi"
-      },
-      "id": "Cmd_Subs",
-      "name": "Write Subs",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [
-        160,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "\nconst raw = $('Plan Render').first().json.stdout.trim();\nreturn [{ json: { payloadB64: Buffer.from(raw).toString('base64') } }];\n"
-      },
-      "id": "Code_MixPayload",
-      "name": "Build Mix Payload",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        420,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "command": "python3 - <<'PY'\nimport base64, datetime, json, os, subprocess\nplan = json.loads(base64.b64decode(\"{{ $json.payloadB64 }}\").decode(\"utf-8\"))\nroot = \"/home/node/files/films/\" + plan[\"slug\"]\nconcat = os.path.join(root, \"render\", \"concat.mp4\")\nfilm = os.path.join(root, \"film.mp4\")\nvf = \"[0:v]format=yuv420p[v]\"\nif plan.get(\"burn_subs\"):\n    style = \"FontSize=%d,Outline=1,Shadow=0,MarginV=28\" % int(plan.get(\"font_size\") or 24)\n    vf = \"[0:v]subtitles=\" + os.path.join(root, \"subs.srt\") + \":force_style='\" + style + \"',format=yuv420p[v]\"\nargs = [\"ffmpeg\", \"-y\", \"-loglevel\", \"error\", \"-i\", concat]\nmusic = (plan.get(\"music_file\") or \"\").strip()\nif music:\n    mp = music if os.path.isabs(music) else os.path.join(root, \"music\", os.path.basename(music))\n    if not os.path.exists(mp):\n        raise SystemExit(\"music file not found: \" + mp)\n    args += [\"-stream_loop\", \"-1\", \"-i\", mp]\n    vol = plan.get(\"music_volume\", 0.15)\n    fc = vf + \";[1:a]volume=\" + str(vol) + \"[m];[0:a][m]amix=inputs=2:duration=first:dropout_transition=0[a]\"\n    args += [\"-filter_complex\", fc, \"-map\", \"0:v\", \"-map\", \"[a]\"]\nelse:\n    args += [\"-filter_complex\", vf, \"-map\", \"0:v\", \"-map\", \"0:a\"]\nargs += [\"-c:v\", \"libx264\", \"-preset\", \"medium\", \"-crf\", \"18\",\n         \"-c:a\", \"aac\", \"-b:a\", \"192k\", \"-movflags\", \"+faststart\", film]\nsubprocess.run(args, check=True)\np = subprocess.run([\"ffprobe\", \"-v\", \"error\", \"-show_entries\", \"format=duration,size\", \"-of\", \"json\", film],\n                   capture_output=True, text=True, check=True)\nmeta = json.loads(p.stdout)\nnow = datetime.datetime.utcnow().isoformat() + \"Z\"\npf = os.path.join(root, \"project.json\")\nproj = json.load(open(pf)) if os.path.exists(pf) else {}\nproj.update({\"status\": \"rendered\", \"updated_at\": now})\nproj.setdefault(\"stages\", {})[\"assembly\"] = {\"status\": \"done\", \"done_at\": now}\nwith open(pf, \"w\") as fh:\n    json.dump(proj, fh, indent=2, ensure_ascii=False)\nprint(json.dumps({\"ok\": True, \"film\": film, \"duration\": round(float(meta[\"format\"][\"duration\"]), 2),\n                  \"size_mb\": round(int(meta[\"format\"][\"size\"]) / 1048576, 2)}))\nPY"
-      },
-      "id": "Cmd_Mix",
-      "name": "Mix Final Film",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [
-        680,
         300
       ]
     },
@@ -237,19 +111,19 @@
             {
               "id": "filmPath",
               "name": "filmPath",
-              "value": "={{ JSON.parse($json.stdout).film }}",
+              "value": "={{ $json.film }}",
               "type": "string"
             },
             {
               "id": "durationSeconds",
               "name": "durationSeconds",
-              "value": "={{ JSON.parse($json.stdout).duration }}",
+              "value": "={{ $json.duration }}",
               "type": "number"
             },
             {
               "id": "sizeMb",
               "name": "sizeMb",
-              "value": "={{ JSON.parse($json.stdout).size_mb }}",
+              "value": "={{ $json.size_mb }}",
               "type": "number"
             },
             {
@@ -267,13 +141,13 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        940,
+        420,
         300
       ]
     }
   ],
   "connections": {
-    "Assemble Form": {
+    "Assemble Hook": {
       "main": [
         [
           {
@@ -299,17 +173,6 @@
       "main": [
         [
           {
-            "node": "Plan → Clips Payload",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Plan → Clips Payload": {
-      "main": [
-        [
-          {
             "node": "Render Shot Clips",
             "type": "main",
             "index": 0
@@ -318,17 +181,6 @@
       ]
     },
     "Render Shot Clips": {
-      "main": [
-        [
-          {
-            "node": "Clips → Concat Payload",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Clips → Concat Payload": {
       "main": [
         [
           {
@@ -343,47 +195,25 @@
       "main": [
         [
           {
-            "node": "Build SRT & Chunk",
+            "node": "Build SRT",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Build SRT & Chunk": {
+    "Build SRT": {
       "main": [
         [
           {
-            "node": "Write Subs",
+            "node": "Write Subs & Mix Final",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Write Subs": {
-      "main": [
-        [
-          {
-            "node": "Build Mix Payload",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build Mix Payload": {
-      "main": [
-        [
-          {
-            "node": "Mix Final Film",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Mix Final Film": {
+    "Write Subs & Mix Final": {
       "main": [
         [
           {
