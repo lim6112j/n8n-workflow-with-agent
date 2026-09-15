@@ -1,0 +1,120 @@
+{
+  "name": "AI Film 06 — Download Film",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "film-download",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "Hook_Download",
+      "name": "Download Hook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -660,
+        300
+      ],
+      "webhookId": "7A1D3C2B-5E4F-4A9B-8C6D-90E2F1B3A456"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = ($json.query?.slug ?? '').toString().trim().toLowerCase().replace(/[^a-z0-9-]/g, '');\nif (!raw) throw new Error('Query parameter \"slug\" is required.');\nreturn [{ json: {\n  slug: raw,\n  filePath: '/home/node/files/films/' + raw + '/film.mp4',\n}}];\n"
+      },
+      "id": "Code_Validate",
+      "name": "Validate Slug",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "={{ $json.filePath }}",
+        "options": {}
+      },
+      "id": "Read_Film",
+      "name": "Read Film File",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        -180,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "binary",
+        "responsePropertyName": "data",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "video/mp4"
+              },
+              {
+                "name": "Content-Disposition",
+                "value": "attachment; filename=\"film.mp4\""
+              }
+            ]
+          }
+        }
+      },
+      "id": "Respond_Film",
+      "name": "Send Film",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        60,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Download Hook": {
+      "main": [
+        [
+          {
+            "node": "Validate Slug",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Slug": {
+      "main": [
+        [
+          {
+            "node": "Read Film File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Film File": {
+      "main": [
+        [
+          {
+            "node": "Send Film",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": false
+}

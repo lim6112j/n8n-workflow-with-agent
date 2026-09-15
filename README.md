@@ -87,12 +87,15 @@ After a project is created, the page shows a **Pipeline** card with the slug fil
 1. **Generate script** → `POST /webhook/film-run-script` (`{project_slug}`) — shows `shotCount` and script path
 2. **Generate shot images** → `POST /webhook/film-gen-shots` — appears when the script finishes
 3. **Generate voiceover** → `POST /webhook/film-gen-voice` — appears when shots finish
-4. **Assemble final film** → `POST /webhook/film-assemble` — shows `filmPath`, duration, size
+4. **Assemble final film** → `POST /webhook/film-assemble` — shows `filmPath`, duration, size, and a **⬇ Download film.mp4** button
+
+The download button hits `GET /webhook/film-download?slug=<slug>` (`film-download.workflow.json`), which streams the rendered `film.mp4` out of the n8n container as `video/mp4` with `Content-Disposition: attachment; filename="film.mp4"`. Only shown after assembly succeeds; requesting a slug with no rendered film returns an empty response (the UI never links to it in that state).
 
 Each next button unlocks only when the previous stage completes; failed stages offer Retry. Shots/voiceover are idempotent (already-generated files are skipped unless `regen_ids` is passed — use curl for selective regeneration).
 
 ## Files
 - `user-intention-fixer.workflow.json`: local source of truth for workflow definition.
 - `film-0*.workflow.json`: AI film pipeline (setup → script → shots → voiceover → assemble).
+- `film-download.workflow.json`: serves the rendered `film.mp4` for download (`GET /webhook/film-download?slug=...`, workflow ID `MewzwAdmqjhPoRAM`).
 - `web/index.html`: project setup web form (see "Film Project Setup UI").
 - `AGENT.md`: authoring rules and API workflow conventions.

@@ -120,6 +120,12 @@
   .kv dd { margin: 0; word-break: break-all; }
   .hidden { display: none; }
   code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .download-btn {
+    display: inline-block; margin-top: 10px; padding: 8px 16px;
+    background: var(--ok); color: #0c1210; border-radius: 8px;
+    font-weight: 700; text-decoration: none; font-size: 13px;
+  }
+  .download-btn:hover { filter: brightness(1.12); }
 </style>
 </head>
 <body>
@@ -173,6 +179,7 @@
 
 const CONFIG = Object.freeze({
   WEBHOOK_URL: "http://localhost:5678/webhook/film-project-setup",
+  DOWNLOAD_URL: "http://localhost:5678/webhook/film-download",
   MAX_REFS: 6,
   REFS_USED_IN_SHOTS: 3,
   MIN_STORY_CHARS: 20,
@@ -207,6 +214,7 @@ const PIPELINE_STAGES = Object.freeze([
     endpoint: "http://localhost:5678/webhook/film-assemble",
     detail: "FFmpeg renders each clip, mixes audio and subtitles, and concatenates the final film — can take several minutes.",
     resultFields: Object.freeze([["filmPath", "Film"], ["durationSeconds", "Duration (s)"], ["sizeMb", "Size (MB)"], ["nextStep", "Next"]]),
+    download: true,
   },
 ]);
 
@@ -497,8 +505,17 @@ function makeStageBody(stage, state) {
   }
   if (state.status === "done" && state.result) {
     body.append(makeStageResult(state.result, stage));
+    if (stage.download && pipeline) body.append(makeDownloadLink(pipeline.slug));
   }
   return body;
+}
+
+function makeDownloadLink(slug) {
+  const link = document.createElement("a");
+  link.className = "download-btn";
+  link.href = CONFIG.DOWNLOAD_URL + "?slug=" + encodeURIComponent(slug);
+  link.textContent = "⬇ Download film.mp4";
+  return link;
 }
 
 function makeStageButton(stage, index, state) {
