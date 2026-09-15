@@ -6,7 +6,9 @@
         "httpMethod": "POST",
         "path": "film-project-setup",
         "responseMode": "lastNode",
-        "options": {}
+        "options": {
+          "allowedOrigins": "*"
+        }
       },
       "id": "Hook_Setup",
       "name": "Project Setup Hook",

@@ -6,7 +6,9 @@
         "httpMethod": "POST",
         "path": "film-assemble",
         "responseMode": "lastNode",
-        "options": {}
+        "options": {
+          "allowedOrigins": "*"
+        }
       },
       "id": "Hook_Assemble",
       "name": "Assemble Hook",

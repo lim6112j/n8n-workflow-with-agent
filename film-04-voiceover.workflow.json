@@ -6,7 +6,9 @@
         "httpMethod": "POST",
         "path": "film-gen-voice",
         "responseMode": "lastNode",
-        "options": {}
+        "options": {
+          "allowedOrigins": "*"
+        }
       },
       "id": "Hook_Voice",
       "name": "Voice Hook",

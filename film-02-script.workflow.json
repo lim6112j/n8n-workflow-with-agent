@@ -6,7 +6,9 @@
         "httpMethod": "POST",
         "path": "film-run-script",
         "responseMode": "lastNode",
-        "options": {}
+        "options": {
+          "allowedOrigins": "*"
+        }
       },
       "id": "Hook_Script",
       "name": "Script Hook",

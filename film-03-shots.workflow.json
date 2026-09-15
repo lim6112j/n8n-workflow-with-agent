@@ -6,7 +6,9 @@
         "httpMethod": "POST",
         "path": "film-gen-shots",
         "responseMode": "lastNode",
-        "options": {}
+        "options": {
+          "allowedOrigins": "*"
+        }
       },
       "id": "Hook_Shots",
       "name": "Shots Hook",
