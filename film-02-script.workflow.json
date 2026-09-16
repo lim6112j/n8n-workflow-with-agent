@@ -50,7 +50,7 @@
     },
     {
       "parameters": {
-        "jsCode": "\nconst res = $json;\nif (!res.ok) throw new Error(res.error || 'Failed to load project story.');\nconst story = (res.story ?? '').toString().trim();\nconst extra = (res.extra_direction ?? '').toString().trim();\nconst title = (res.title ?? 'Untitled').toString();\nconst VOICES = ['zephyr', 'puck', 'charon', 'kore', 'fenrir', 'leda', 'orus', 'aoede', 'callirrhoe', 'autonoe', 'enceladus', 'iapetus', 'umbriel', 'algieba', 'despina', 'erinome', 'algenib', 'rasalgethi', 'laomedeia', 'achernar', 'alnilam', 'schedar', 'gacrux', 'pulcherrima', 'achird', 'zubenelgenubi', 'vindemiatrix', 'sadachbia', 'sadaltager', 'sulafat'];\nconst TTS_DEFAULT = 'google/gemini-3.1-flash-tts-preview';\n\nlet prompt = [\n'You are a film script writer and storyboard artist. Convert the story below into a shot-by-shot script.',\n'',\n'RULES:',\n'- Return ONLY strict JSON. No markdown fences, no commentary.',\n'- 4 to 12 shots total, grouped into 1 to 4 scenes.',\n'- Each character: id (snake_case), name, visual_description (detailed, stable wording for image generation), reference_images (empty array), voice (a TTS voice name from: ' + VOICES.join(', ') + ' — pick a distinct voice per character that fits their age and personality), tts_model (\"google/gemini-3.1-flash-tts-preview\" unless the author named another OpenRouter TTS model), tts_instructions (short delivery direction, e.g. \"warm, gravelly, unhurried\").',\n'- Write ALL narration and dialogue in the SAME LANGUAGE as the story below.',\n'- Each shot: id (\"shot_001\" style, sequential across scenes), image_prompt (self-contained English description of ONE 16:9 frame; refer to characters by name), characters (array of character ids present, may be empty for scenery), narration (string or null) OR dialogue (array of {character, text}), duration_hint_sec (3 to 12), motion (\"auto\").',\n'- A shot has EITHER narration or dialogue, never both. Lines must be under 240 characters each.',\n'- Top level also: title, language (BCP-47 code matching the story language, e.g. \"en\", \"ko\"), style_notes (visual style for image generation), narrator_voice (from the voice list), narrator_instructions.',\n'',\n'SCHEMA:',\n'{\"title\":string,\"slug\":string,\"language\":string,\"style_notes\":string,\"narrator_voice\":string,\"narrator_instructions\":string,\"characters\":[{\"id\":string,\"name\":string,\"visual_description\":string,\"reference_images\":[],\"voice\":string,\"tts_model\":string,\"tts_instructions\":string}],\"scenes\":[{\"id\":string,\"title\":string,\"shots\":[{\"id\":string,\"image_prompt\":string,\"characters\":[string],\"narration\":string|null,\"dialogue\":[{\"character\":string,\"text\":string}],\"duration_hint_sec\":number,\"motion\":\"auto\"}]}]}',\n'',\n'Set the top-level \"slug\" exactly to: ' + res.slug,\n'STORY TITLE: ' + title,\n'STORY:',\nstory,\n].join('\\n');\nif (extra) prompt += '\\n\\nEXTRA DIRECTION FROM THE AUTHOR (follow it):\\n' + extra;\n\nreturn [{ json: { slug: res.slug, title, prompt } }];\n"
+        "jsCode": "\nconst res = $json;\nif (!res.ok) throw new Error(res.error || 'Failed to load project story.');\nconst story = (res.story ?? '').toString().trim();\nconst extra = (res.extra_direction ?? '').toString().trim();\nconst title = (res.title ?? 'Untitled').toString();\nconst words = story.split(/\\s+/).filter(Boolean).length;\nconst targetShots = Math.min(48, Math.max(6, Math.round(words / 12)));\nconst VOICES = ['zephyr', 'puck', 'charon', 'kore', 'fenrir', 'leda', 'orus', 'aoede', 'callirrhoe', 'autonoe', 'enceladus', 'iapetus', 'umbriel', 'algieba', 'despina', 'erinome', 'algenib', 'rasalgethi', 'laomedeia', 'achernar', 'alnilam', 'schedar', 'gacrux', 'pulcherrima', 'achird', 'zubenelgenubi', 'vindemiatrix', 'sadachbia', 'sadaltager', 'sulafat'];\nconst TTS_DEFAULT = 'google/gemini-3.1-flash-tts-preview';\n\nlet prompt = [\n'You are a film script writer and storyboard artist. Convert the story below into a shot-by-shot script.',\n'',\n'RULES:',\n'- Return ONLY strict JSON. No markdown fences, no commentary.',\n'- Aim for about ' + targetShots + ' shots in total (story length: ' + words + ' words). Scale the shot count to the story — never cram a long story into too few shots. Group shots into scenes of 2 to 6.',\n'- CHARACTER CONSISTENCY (critical): each character gets ONE locked character sheet in visual_description that is reused verbatim for every image. Write it as a single 40-80 word paragraph in fixed order: age, face, hair, build, signature clothing and accessories. Never vary or re-describe it between shots.',\n'- Keep the cast small and stable: reuse the same character ids across shots; never invent lookalike variants of a character.',\n'- Each character: id (snake_case), name, visual_description (the locked character sheet), reference_images (empty array), voice (a TTS voice name from: ' + VOICES.join(', ') + ' — pick a distinct voice per character that fits their age and personality), tts_model (\"google/gemini-3.1-flash-tts-preview\" unless the author named another OpenRouter TTS model), tts_instructions (short delivery direction, e.g. \"warm, gravelly, unhurried\").',\n'- Write ALL narration and dialogue in the SAME LANGUAGE as the story below.',\n'- Each shot: id (\"shot_001\" style, sequential across scenes), image_prompt (self-contained English description of ONE 16:9 frame; refer to characters by name and keep wardrobe, hair and props consistent with their locked character sheet), characters (array of character ids present, may be empty for scenery), narration (string or null) OR dialogue (array of {character, text}), duration_hint_sec (3 to 12), motion (\"auto\").',\n'- A shot has EITHER narration or dialogue, never both. Lines must be under 240 characters each.',\n'- Top level also: title, language (BCP-47 code matching the story language, e.g. \"en\", \"ko\"), style_notes (visual style for image generation), narrator_voice (from the voice list), narrator_instructions.',\n'',\n'SCHEMA:',\n'{\"title\":string,\"slug\":string,\"language\":string,\"style_notes\":string,\"narrator_voice\":string,\"narrator_instructions\":string,\"characters\":[{\"id\":string,\"name\":string,\"visual_description\":string,\"reference_images\":[],\"voice\":string,\"tts_model\":string,\"tts_instructions\":string}],\"scenes\":[{\"id\":string,\"title\":string,\"shots\":[{\"id\":string,\"image_prompt\":string,\"characters\":[string],\"narration\":string|null,\"dialogue\":[{\"character\":string,\"text\":string}],\"duration_hint_sec\":number,\"motion\":\"auto\"}]}]}',\n'',\n'Set the top-level \"slug\" exactly to: ' + res.slug,\n'STORY TITLE: ' + title,\n'STORY:',\nstory,\n].join('\\n');\nif (extra) prompt += '\\n\\nEXTRA DIRECTION FROM THE AUTHOR (follow it):\\n' + extra;\n\nreturn [{ json: { slug: res.slug, title, prompt } }];\n"
       },
       "id": "Code_BuildPrompt",
       "name": "Build Script Prompt",
@@ -84,7 +84,7 @@
         "model": "anthropic/claude-haiku-4.5",
         "options": {
           "temperature": 0.2,
-          "maxTokens": 8000
+          "maxTokens": 16000
         }
       },
       "id": "LM_OpenRouter",
@@ -132,6 +132,129 @@
     },
     {
       "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "python",
+        "pythonCode": "\nimport json, os\nitem = _items[0][\"json\"]\nslug = item[\"slug\"]\nroot = \"/home/node/files/films/\" + slug\nwith open(os.path.join(root, \"script.json\")) as fh:\n    script = json.load(fh)\njobs = []\nfor c in script.get(\"characters\", []):\n    cid = (c.get(\"id\") or \"\").strip()\n    if not cid:\n        continue\n    jobs.append({\"json\": {\"char_id\": cid, \"name\": c.get(\"name\") or cid,\n                          \"visual_description\": c.get(\"visual_description\", \"\"),\n                          \"style_notes\": script.get(\"style_notes\", \"\"),\n                          \"slug\": slug,\n                          \"image_model\": \"google/gemini-3.1-flash-image\"}})\nif not jobs:\n    return [{\"json\": {\"ok\": True, \"slug\": slug, \"no_characters\": True}}]\nreturn jobs\n"
+      },
+      "id": "Py_CharJobs",
+      "name": "Build Character Jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-has-chars",
+              "leftValue": "={{ $json.no_characters }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "If_HasChars",
+      "name": "Has Characters?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        940,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "python",
+        "pythonCode": "\nimport base64, glob, os\nroot = \"/home/node/files/films/\" + _items[0][\"json\"][\"slug\"]\nref_parts = []\nfor p in sorted(glob.glob(os.path.join(root, \"refs\", \"ref_*.jpg\")))[:3]:\n    with open(p, \"rb\") as fh:\n        ref_parts.append({\"type\": \"image_url\", \"image_url\": {\"url\": \"data:image/jpeg;base64,\" + base64.b64encode(fh.read()).decode(\"ascii\")}})\nout = []\nfor it in _items:\n    c = it[\"json\"]\n    lines = [\"Character reference sheet for a photorealistic film.\",\n             \"Exactly one character in frame: \" + c[\"name\"] + \". Full body, standing, relaxed neutral pose, facing the camera, plain light-gray studio background.\"]\n    if ref_parts:\n        lines.append(\"The attached image(s) are identity references for this film; where they show this character, match their face and hair closely.\")\n    if c.get(\"visual_description\"):\n        lines.append(\"Character sheet: \" + c[\"visual_description\"])\n    if c.get(\"style_notes\"):\n        lines.append(\"Overall style: \" + c[\"style_notes\"])\n    lines.append(\"Photorealistic, even studio lighting, sharp focus. No text, captions, watermarks, or borders.\")\n    body = {\"model\": c.get(\"image_model\") or \"google/gemini-3.1-flash-image\",\n            \"prompt\": \"\\n\".join(lines), \"aspect_ratio\": \"3:4\",\n            \"input_references\": ref_parts}\n    out.append({\"json\": {\"charId\": c[\"char_id\"], \"slug\": c[\"slug\"], \"body\": body}})\nreturn out\n"
+      },
+      "id": "Py_PortraitReq",
+      "name": "Build Portrait Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/images",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openRouterApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "Http_Portrait",
+      "name": "OpenRouter Portrait",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1460,
+        300
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "CrCtPveFpgBQ5Pir",
+          "name": "OpenRouter account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst srcs = $('Build Portrait Request').all();\nconst out = [];\nfor (let i = 0; i < srcs.length; i++) {\n  const src = srcs[i].json;\n  const resp = (items[i] && items[i].json) ?? {};\n  const arr = Array.isArray(resp.data) ? resp.data : [];\n  const img = arr.find((d) => d && d.b64_json);\n  if (!img) {\n    const reason = (resp.error && (resp.error.message || resp.error.code)) || 'no image in OpenRouter response';\n    out.push({ json: { slug: src.slug, charId: src.charId, ok: false, error: String(reason).slice(0, 300) } });\n    continue;\n  }\n  out.push({ json: { slug: src.slug, charId: src.charId, ok: true, imageB64: img.b64_json } });\n}\nreturn out;\n"
+      },
+      "id": "Code_PortraitExtract",
+      "name": "Extract Portrait",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1720,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "python",
+        "pythonCode": "\nimport base64, datetime, json, os, subprocess\nfirst = _items[0][\"json\"] if _items else {}\nslug = first.get(\"slug\")\nif not slug:\n    raise RuntimeError(\"no portrait results received\")\nroot = \"/home/node/files/films/\" + slug\nanchors_dir = os.path.join(root, \"refs\", \"anchors\")\nos.makedirs(anchors_dir, exist_ok=True)\nsaved, failed = [], []\nnote = \"\"\nif first.get(\"no_characters\"):\n    note = \"script has no characters; anchors skipped\"\nelse:\n    for it in _items:\n        d = it[\"json\"]\n        if d.get(\"slug\") != slug:\n            continue\n        if not d.get(\"ok\"):\n            failed.append({\"char_id\": d.get(\"charId\"), \"error\": (d.get(\"error\") or \"\")[:200]})\n            continue\n        png = os.path.join(anchors_dir, \"char_%s.png\" % d.get(\"charId\"))\n        with open(png, \"wb\") as fh:\n            fh.write(base64.b64decode(d[\"imageB64\"]))\n        jpg = os.path.join(anchors_dir, \"char_%s.jpg\" % d.get(\"charId\"))\n        r = subprocess.run([\"ffmpeg\", \"-y\", \"-loglevel\", \"error\", \"-i\", png,\n                            \"-vf\", \"scale='min(768,iw)':-2\", \"-q:v\", \"4\", jpg],\n                           capture_output=True, text=True)\n        if r.returncode == 0 and os.path.exists(jpg):\n            saved.append(d.get(\"charId\"))\n        else:\n            failed.append({\"char_id\": d.get(\"charId\"), \"error\": (r.stderr or \"ffmpeg failed\")[-200:]})\n    if not saved:\n        raise RuntimeError(\"all character anchors failed: \" + json.dumps(failed))\n    if failed:\n        note = \"some anchors failed; affected shots fall back to global refs\"\nnow = datetime.datetime.utcnow().isoformat() + \"Z\"\npf = os.path.join(root, \"project.json\")\nproj = json.load(open(pf)) if os.path.exists(pf) else {}\nproj.setdefault(\"stages\", {})[\"anchors\"] = {\"status\": \"done\" if saved else \"skipped\", \"done_at\": now, \"count\": len(saved)}\nwith open(pf, \"w\") as fh:\n    json.dump(proj, fh, indent=2, ensure_ascii=False)\nreturn [{\"json\": {\"ok\": True, \"slug\": slug, \"anchors\": saved, \"failed\": failed, \"note\": note}}]\n"
+      },
+      "id": "Py_WriteAnchors",
+      "name": "Write Character Anchors",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        300
+      ]
+    },
+    {
+      "parameters": {
         "assignments": {
           "assignments": [
             {
@@ -145,6 +268,12 @@
               "name": "shotCount",
               "value": "={{ $('Parse Script JSON').first().json.shotCount }}",
               "type": "number"
+            },
+            {
+              "id": "anchors",
+              "name": "anchors",
+              "value": "={{ $json.anchors }}",
+              "type": "array"
             },
             {
               "id": "scriptPath",
@@ -167,7 +296,7 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        420,
+        2240,
         300
       ]
     }
@@ -240,6 +369,79 @@
       ]
     },
     "Save Script": {
+      "main": [
+        [
+          {
+            "node": "Build Character Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Character Jobs": {
+      "main": [
+        [
+          {
+            "node": "Has Characters?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Characters?": {
+      "main": [
+        [
+          {
+            "node": "Build Portrait Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Write Character Anchors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Portrait Request": {
+      "main": [
+        [
+          {
+            "node": "OpenRouter Portrait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Portrait": {
+      "main": [
+        [
+          {
+            "node": "Extract Portrait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Portrait": {
+      "main": [
+        [
+          {
+            "node": "Write Character Anchors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Character Anchors": {
       "main": [
         [
           {

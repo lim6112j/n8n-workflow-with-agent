@@ -75,7 +75,8 @@ Contract (enforced both client- and server-side):
 - Reference images — 1–6 files, jpg/jpeg/png/webp, sent as form fields `image_1`…`image_6` (order = ref order)
 
 Notes:
-- **Only the first 3 refs are used** for shot generation (film-03 caps `input_references` at 3 for OpenRouter). The form badges images 4+ as "unused in shots".
+- **Refs feed character anchors, not shots directly.** The script stage (film-02) generates one canonical full-body anchor portrait per character (`refs/anchors/char_<id>.jpg`) from the uploaded refs plus the locked character sheet. Shot generation (film-03) then attaches only the anchors of characters present in each shot (max 3), with explicit `IMAGE N = <character>` mapping in the prompt. Scenery shots and shots with missing anchors fall back to the first 3 global refs. The form badges images 4+ as "unused in shots" — they are also unused for anchors.
+- The script agent scales the shot budget to story length (~1 shot per 12 words, 6–48 shots), so longer stories produce longer films instead of crammed frames.
 - The webhook nodes of all five film workflows have `allowedOrigins: "*"` so the page can POST cross-origin; n8n only sends CORS headers when the request carries an `Origin` header.
 - Server-side validation failures return n8n's generic `{"message":"Error in workflow"}` — the precise messages ("Film Title is required.", etc.) come from the form's client-side validation.
 - Requires the film workflows to be active in n8n.
@@ -84,7 +85,7 @@ Notes:
 
 After a project is created, the page shows a **Pipeline** card with the slug filled in automatically:
 
-1. **Generate script** → `POST /webhook/film-run-script` (`{project_slug}`) — shows `shotCount` and script path
+1. **Generate script** → `POST /webhook/film-run-script` (`{project_slug}`) — shows `shotCount` and script path; also generates per-character anchor portraits
 2. **Generate shot images** → `POST /webhook/film-gen-shots` — appears when the script finishes
 3. **Generate voiceover** → `POST /webhook/film-gen-voice` — appears when shots finish
 4. **Assemble final film** → `POST /webhook/film-assemble` — shows `filmPath`, duration, size, and a **⬇ Download film.mp4** button
@@ -95,7 +96,7 @@ Each next button unlocks only when the previous stage completes; failed stages o
 
 ## Files
 - `user-intention-fixer.workflow.json`: local source of truth for workflow definition.
-- `film-0*.workflow.json`: AI film pipeline (setup → script → shots → voiceover → assemble).
+- `film-0*.workflow.json`: AI film pipeline (setup → script + character anchors → shots → voiceover → assemble).
 - `film-download.workflow.json`: serves the rendered `film.mp4` for download (`GET /webhook/film-download?slug=...`, workflow ID `MewzwAdmqjhPoRAM`).
 - `web/index.html`: project setup web form (see "Film Project Setup UI").
 - `AGENT.md`: authoring rules and API workflow conventions.

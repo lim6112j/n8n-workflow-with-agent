@@ -64,30 +64,16 @@
     },
     {
       "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "\nconst shot = $json.item ?? $json;\nconst lines = ['Cinematic 16:9 film still, single frame.'];\nif (shot.style_notes) lines.push('Overall style: ' + shot.style_notes);\nfor (const c of (shot.character_blocks ?? [])) {\n  lines.push(c.name + ': ' + c.visual_description + ' Use the attached reference image(s) of ' + c.name + ' and keep facial features, hairstyle, body type, and clothing exactly consistent.');\n}\nlines.push('Scene: ' + shot.image_prompt);\nlines.push('Photorealistic, cinematic lighting. No text, captions, watermarks, or borders.');\nreturn { json: { shotId: shot.id, slug: shot.slug, image_model: shot.image_model ?? 'google/gemini-3.1-flash-image', prompt: lines.join('\\n') } };\n"
-      },
-      "id": "Code_ShotPrompt",
-      "name": "Build Shot Prompt",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        -360,
-        300
-      ]
-    },
-    {
-      "parameters": {
         "mode": "runOnceForAllItems",
         "language": "python",
-        "pythonCode": "\nimport base64, glob, json, os\nroot = \"/home/node/files/films/\" + _items[0][\"json\"][\"slug\"]\nrefs = sorted(glob.glob(os.path.join(root, \"refs\", \"ref_*.jpg\")))\nif not refs:\n    raise RuntimeError(\"no normalized refs in \" + root + \"/refs — re-run Project Setup\")\nrefs = refs[:3]  # OpenRouter accepts at most 3 input_references per request\nref_parts = []\nfor p in refs:\n    with open(p, \"rb\") as fh:\n        data_url = \"data:image/jpeg;base64,\" + base64.b64encode(fh.read()).decode(\"ascii\")\n    ref_parts.append({\"type\": \"image_url\", \"image_url\": {\"url\": data_url}})\nout = []\nfor it in _items:\n    item = it[\"json\"]\n    body = {\"model\": item.get(\"image_model\") or \"google/gemini-3.1-flash-image\",\n            \"prompt\": item[\"prompt\"], \"aspect_ratio\": \"16:9\",\n            \"input_references\": ref_parts}\n    out.append({\"json\": {\"shotId\": item[\"shotId\"], \"slug\": item[\"slug\"], \"body\": body}})\nreturn out\n"
+        "pythonCode": "\nimport base64, glob, os\n\nMAX_REFS = 3\nstyle_cache = {}\nout = []\nfor it in _items:\n    j = it.get('json', {})\n    inner = j.get('item')\n    shot = inner if isinstance(inner, dict) else j\n    slug = shot.get('slug')\n    root = '/home/node/files/films/' + slug\n    chars = shot.get('character_blocks') or []\n    ref_parts = []\n    ref_notes = []\n    for c in chars:\n        if len(ref_parts) >= MAX_REFS:\n            break\n        p = os.path.join(root, 'refs', 'anchors', 'char_%s.jpg' % c.get('id'))\n        if os.path.exists(p):\n            with open(p, 'rb') as fh:\n                url = 'data:image/jpeg;base64,' + base64.b64encode(fh.read()).decode('ascii')\n            ref_parts.append({'type': 'image_url', 'image_url': {'url': url}})\n            ref_notes.append(('char', c.get('name') or c.get('id')))\n    if not ref_parts:\n        if slug not in style_cache:\n            style_cache[slug] = sorted(glob.glob(os.path.join(root, 'refs', 'ref_*.jpg')))[:MAX_REFS]\n        for p in style_cache[slug]:\n            with open(p, 'rb') as fh:\n                url = 'data:image/jpeg;base64,' + base64.b64encode(fh.read()).decode('ascii')\n            ref_parts.append({'type': 'image_url', 'image_url': {'url': url}})\n            ref_notes.append(('style', ''))\n    lines = ['Cinematic 16:9 film still, single frame.']\n    if shot.get('style_notes'):\n        lines.append('Overall style: ' + shot['style_notes'])\n    for i, (kind, label) in enumerate(ref_notes, 1):\n        if kind == 'style':\n            lines.append('IMAGE %d shows the overall look of the film; match its lighting, palette and mood.' % i)\n        else:\n            lines.append('IMAGE %d is the canonical reference for %s. %s must look EXACTLY like in image %d: identical face, hairstyle, body type and clothing.' % (i, label, label, i))\n    for c in chars:\n        desc = (c.get('visual_description') or '').strip()\n        if desc:\n            lines.append('%s character sheet: %s' % (c.get('name') or c.get('id'), desc))\n    lines.append('Scene: ' + shot.get('image_prompt', ''))\n    lines.append('Photorealistic, cinematic lighting. Every recurring character must stay pixel-consistent with their reference image. No text, captions, watermarks, or borders.')\n    body = {'model': shot.get('image_model') or 'google/gemini-3.1-flash-image',\n            'prompt': '\\n'.join(lines), 'aspect_ratio': '16:9',\n            'input_references': ref_parts}\n    out.append({'json': {'shotId': shot.get('id'), 'slug': slug, 'body': body, 'ref_count': len(ref_parts)}})\nreturn out\n"
       },
       "id": "Py_ImageBody",
       "name": "Build Image Request",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -100,
+        -360,
         300
       ]
     },
@@ -157,13 +143,13 @@
             {
               "id": "slug",
               "name": "slug",
-              "value": "={{ $('Build Shot Prompt').first().json.slug }}",
+              "value": "={{ $('Build Image Request').first().json.slug }}",
               "type": "string"
             },
             {
               "id": "shotsPath",
               "name": "shotsPath",
-              "value": "=/home/node/files/films/{{ $('Build Shot Prompt').first().json.slug }}/shots",
+              "value": "=/home/node/files/films/{{ $('Build Image Request').first().json.slug }}/shots",
               "type": "string"
             },
             {
@@ -221,17 +207,6 @@
       ]
     },
     "Split Shots": {
-      "main": [
-        [
-          {
-            "node": "Build Shot Prompt",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build Shot Prompt": {
       "main": [
         [
           {
