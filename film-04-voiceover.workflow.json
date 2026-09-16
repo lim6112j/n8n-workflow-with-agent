@@ -37,7 +37,7 @@
       "parameters": {
         "mode": "runOnceForAllItems",
         "language": "python",
-        "pythonCode": "\nimport json, os, re\nitem = _items[0][\"json\"]\nslug = item[\"slug\"]\nroot = \"/home/node/files/films/\" + slug\nspath = os.path.join(root, \"script.json\")\nif not os.path.exists(spath):\n    raise RuntimeError(\"no script.json in \" + root + \" — run the Script stage first\")\nwith open(spath) as fh:\n    script = json.load(fh)\nchars = {c[\"id\"]: c for c in script.get(\"characters\", [])}\nDEFAULT_TTS = \"google/gemini-3.1-flash-tts-preview\"\ndef ok_model(m):\n    return bool(re.fullmatch(r\"[A-Za-z0-9][A-Za-z0-9/_.:\\-]{2,80}\", m or \"\"))\ndef ok_voice(v):\n    return bool(re.fullmatch(r\"[A-Za-z0-9_\\-:.]{2,40}\", (v or \"\").strip()))\noverride = item.get(\"tts_model\") if ok_model(item.get(\"tts_model\")) else None\nregen = set(item.get(\"regen_ids\") or [])\nlines = []\nfor scene in script.get(\"scenes\", []):\n    for shot in scene.get(\"shots\", []):\n        sid = shot[\"id\"]\n        pending = []\n        if shot.get(\"narration\"):\n            pending.append({\"text\": shot[\"narration\"], \"voice\": script.get(\"narrator_voice\", \"charon\"),\n                            \"instructions\": script.get(\"narrator_instructions\", \"\"), \"model\": DEFAULT_TTS})\n        k = 1\n        for d in shot.get(\"dialogue\") or []:\n            k += 1\n            c = chars.get(d.get(\"character\", \"\"), {})\n            pending.append({\"text\": d.get(\"text\", \"\"), \"voice\": c.get(\"voice\", \"kore\"),\n                            \"instructions\": c.get(\"tts_instructions\", \"\"), \"model\": c.get(\"tts_model\", DEFAULT_TTS)})\n        seq = 0\n        for entry in pending:\n            seq += 1\n            lid = sid + \"_L%02d\" % seq\n            out_rel = \"audio/lines/\" + lid + \".mp3\"\n            exists = os.path.exists(os.path.join(root, out_rel))\n            if exists and sid not in regen:\n                continue\n            text = (entry.get(\"text\") or \"\").strip()[:3800]\n            if not text:\n                continue\n            voice = (entry.get(\"voice\") or \"\").strip().lower() if ok_voice(entry.get(\"voice\")) else \"kore\"\n            model = override or (entry.get(\"model\") if ok_model(entry.get(\"model\")) else None) or DEFAULT_TTS\n            instr = (entry.get(\"instructions\") or \"\").strip()[:500]\n            if instr:\n                text = (instr + \": \" + text)[:4000]  # expressive TTS models treat a leading directive as style\n            fmt = \"pcm\" if \"gemini\" in model.lower() else \"mp3\"  # Gemini TTS only outputs PCM\n            lines.append({\"slug\": slug, \"shotId\": sid, \"lineId\": lid, \"text\": text,\n                          \"voice\": voice, \"tts_model\": model, \"fmt\": fmt, \"outPath\": out_rel})\nif not lines:\n    raise RuntimeError(\"All voiceover audio already exists. Enter shot ids in the form to force regeneration.\")\nreturn [{\"json\": {\"ok\": True, \"slug\": slug, \"lines\": lines}}]\n"
+        "pythonCode": "\nimport json, os, re\nitem = _items[0][\"json\"]\nslug = item[\"slug\"]\nroot = \"/home/node/files/films/\" + slug\nspath = os.path.join(root, \"script.json\")\nif not os.path.exists(spath):\n    raise RuntimeError(\"no script.json in \" + root + \" — run the Script stage first\")\nwith open(spath) as fh:\n    script = json.load(fh)\nchars = {c[\"id\"]: c for c in script.get(\"characters\", [])}\nDEFAULT_TTS = \"google/gemini-3.1-flash-tts-preview\"\ndef ok_model(m):\n    return bool(re.fullmatch(r\"[A-Za-z0-9][A-Za-z0-9/_.:\\-]{2,80}\", m or \"\"))\ndef ok_voice(v):\n    return bool(re.fullmatch(r\"[A-Za-z0-9_\\-:.]{2,40}\", (v or \"\").strip()))\noverride = item.get(\"tts_model\") if ok_model(item.get(\"tts_model\")) else None\nregen = set(item.get(\"regen_ids\") or [])\nlines = []\nfor scene in script.get(\"scenes\", []):\n    for shot in scene.get(\"shots\", []):\n        sid = shot[\"id\"]\n        pending = []\n        if shot.get(\"narration\"):\n            pending.append({\"text\": shot[\"narration\"], \"voice\": script.get(\"narrator_voice\", \"charon\"),\n                            \"instructions\": script.get(\"narrator_instructions\", \"\"), \"model\": DEFAULT_TTS})\n        k = 1\n        for d in shot.get(\"dialogue\") or []:\n            k += 1\n            c = chars.get(d.get(\"character\", \"\"), {})\n            pending.append({\"text\": d.get(\"text\", \"\"), \"voice\": c.get(\"voice\", \"kore\"),\n                            \"instructions\": c.get(\"tts_instructions\", \"\"), \"model\": c.get(\"tts_model\", DEFAULT_TTS)})\n        seq = 0\n        for entry in pending:\n            seq += 1\n            lid = sid + \"_L%02d\" % seq\n            out_rel = \"audio/lines/\" + lid + \".mp3\"\n            exists = os.path.exists(os.path.join(root, out_rel))\n            if exists and sid not in regen:\n                continue\n            text = (entry.get(\"text\") or \"\").strip()[:3800]\n            if not text:\n                continue\n            voice = (entry.get(\"voice\") or \"\").strip().lower() if ok_voice(entry.get(\"voice\")) else \"kore\"\n            model = override or (entry.get(\"model\") if ok_model(entry.get(\"model\")) else None) or DEFAULT_TTS\n            instr = (entry.get(\"instructions\") or \"\").strip()[:500]\n            # Gemini TTS documented style-prompt pattern: \"Say <style>: <text>\".\n            # Bare text kept for the fallback retry — some instruction strings make\n            # the upstream return HTTP 200 with an empty audio stream (502 surfaced).\n            styled = (\"Say \" + instr + \": \" + text)[:4000] if instr else text\n            fmt = \"pcm\" if \"gemini\" in model.lower() else \"mp3\"  # Gemini TTS only outputs PCM\n            lines.append({\"slug\": slug, \"shotId\": sid, \"lineId\": lid, \"text\": text, \"styled_text\": styled,\n                          \"voice\": voice, \"tts_model\": model, \"fmt\": fmt, \"outPath\": out_rel})\nif not lines:\n    raise RuntimeError(\"All voiceover audio already exists. Enter shot ids in the form to force regeneration.\")\nreturn [{\"json\": {\"ok\": True, \"slug\": slug, \"lines\": lines}}]\n"
       },
       "id": "Py_LoadLines",
       "name": "Load TTS Lines",
@@ -70,7 +70,7 @@
         "nodeCredentialType": "openRouterApi",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ { model: $json.tts_model, input: $json.text, voice: $json.voice, response_format: $json.fmt } }}",
+        "jsonBody": "={{ { model: $json.tts_model, input: $json.styled_text, voice: $json.voice, response_format: $json.fmt } }}",
         "options": {
           "timeout": 120000,
           "response": {
@@ -83,6 +83,7 @@
       },
       "id": "Http_TTS",
       "name": "OpenRouter TTS",
+      "onError": "continueRegularOutput",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
@@ -101,7 +102,7 @@
     },
     {
       "parameters": {
-        "jsCode": "\nconst srcs = $('Split Lines').all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const line = srcs[i].json;\n  const buf = await this.helpers.getBinaryDataBuffer(i, 'data');\n  if (!buf || !buf.length) throw new Error('No audio returned for line ' + (line.lineId ?? i));\n  out.push({ json: { slug: line.slug, shotId: line.shotId, lineId: line.lineId, fmt: line.fmt ?? 'mp3', audioB64: buf.toString('base64') } });\n}\nreturn out;\n"
+        "jsCode": "\nconst srcs = $('Split Lines').all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const line = srcs[i].json;\n  let buf = null;\n  try { buf = await this.helpers.getBinaryDataBuffer(i, 'data'); } catch (e) {}\n  if (buf && buf.length) {\n    out.push({ json: { slug: line.slug, shotId: line.shotId, lineId: line.lineId, fmt: line.fmt ?? 'mp3', audioB64: buf.toString('base64') } });\n  } else {\n    // Provider returned no audio (e.g. Gemini TTS empty stream on styled input).\n    // Mark the line for one bare-text retry instead of failing the whole run.\n    out.push({ json: { fallback: true, slug: line.slug, shotId: line.shotId, lineId: line.lineId, fmt: line.fmt ?? 'mp3', text: line.text, voice: line.voice, tts_model: line.tts_model } });\n  }\n}\nreturn out;\n"
       },
       "id": "Code_CollectAudio",
       "name": "Collect Audio",
@@ -109,6 +110,105 @@
       "typeVersion": 2,
       "position": [
         -100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-fallback",
+              "leftValue": "={{ $json.fallback }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "If_NeedsFallback",
+      "name": "Needs Fallback?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/audio/speech",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openRouterApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { model: $json.tts_model, input: $json.text, voice: $json.voice, response_format: $json.fmt } }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "id": "Http_TTSRetry",
+      "name": "OpenRouter TTS Retry",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        940,
+        300
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "CrCtPveFpgBQ5Pir",
+          "name": "OpenRouter account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst srcs = $('Needs Fallback?').all(0);\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const line = srcs[i].json;\n  let buf = null;\n  try { buf = await this.helpers.getBinaryDataBuffer(i, 'data'); } catch (e) {}\n  if (!buf || !buf.length) {\n    throw new Error('TTS returned no audio for line ' + (line.lineId ?? i) + ' even without style instructions');\n  }\n  out.push({ json: { slug: line.slug, shotId: line.shotId, lineId: line.lineId, fmt: line.fmt ?? 'mp3', audioB64: buf.toString('base64') } });\n}\nreturn out;\n"
+      },
+      "id": "Code_CollectRetry",
+      "name": "Collect Retry Audio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "options": {}
+      },
+      "id": "Merge_Audio",
+      "name": "Merge Audio Items",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        1460,
         300
       ]
     },
@@ -220,6 +320,57 @@
       ]
     },
     "Collect Audio": {
+      "main": [
+        [
+          {
+            "node": "Needs Fallback?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Fallback?": {
+      "main": [
+        [
+          {
+            "node": "OpenRouter TTS Retry",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge Audio Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter TTS Retry": {
+      "main": [
+        [
+          {
+            "node": "Collect Retry Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Retry Audio": {
+      "main": [
+        [
+          {
+            "node": "Merge Audio Items",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Audio Items": {
       "main": [
         [
           {
