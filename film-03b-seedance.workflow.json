@@ -45,7 +45,7 @@
       "parameters": {
         "mode": "runOnceForAllItems",
         "language": "python",
-        "pythonCode": "\nimport json, os\n\nitem = _items[0][\"json\"]\nslug = item[\"slug\"]\nregen = item.get(\"regen_ids\") or []\nshot_filter = set(item.get(\"shot_ids\") or [])\nroot = \"/home/node/files/films/\" + slug\nscript_path = os.path.join(root, \"script.json\")\nif not os.path.exists(script_path):\n    raise RuntimeError(\"project not found: \" + root + \" — run the Script stage first\")\nwith open(script_path) as fh:\n    script = json.load(fh)\nvideos_dir = os.path.join(root, \"videos\")\nos.makedirs(videos_dir, exist_ok=True)\ncamera_phrases = {\n    \"zoom_in\": \"slow dolly push-in toward the subject\",\n    \"zoom_out\": \"slow pull-back revealing more of the scene\",\n    \"pan_left\": \"smooth camera pan to the left\",\n    \"pan_right\": \"smooth camera pan to the right\",\n    \"auto\": \"subtle cinematic camera drift\",\n}\njobs = []\nskipped = 0\nmissing = 0\nfor scene in script.get(\"scenes\", []):\n    for shot in scene.get(\"shots\", []):\n        sid = shot[\"id\"]\n        if shot_filter and sid not in shot_filter:\n            continue\n        png = os.path.join(root, \"shots\", sid + \".png\")\n        if not os.path.exists(png):\n            missing += 1\n            continue\n        if os.path.exists(os.path.join(videos_dir, sid + \".mp4\")) and sid not in regen:\n            skipped += 1\n            continue\n        hint = shot.get(\"duration_hint_sec\") or 5\n        try:\n            raw_dur = max(4, min(8, int(round(float(hint)))))\n        except (TypeError, ValueError):\n            raw = 5\n        else:\n            raw = raw_dur\n        valid = (4, 6, 8)  # Veo 3.1 Lite supported durations\n        duration = max(valid, key=lambda v: (abs(v - raw), -v))  # tie-break: prefer longer clip\n        duration = min(valid, key=lambda v: (abs(v - raw), -v))\n        motion = shot.get(\"motion\") if shot.get(\"motion\") in camera_phrases else \"auto\"\n        prompt = (shot.get(\"image_prompt\") or \"cinematic scene\").strip()\n        prompt += \" Camera: \" + camera_phrases[motion] + \".\"\n        prompt += \" Keep character faces, hair, and outfits identical to the input image.\"\n        prompt += \" Cinematic lighting, no text overlays.\"\n        jobs.append({\n            \"shotId\": sid,\n            \"pngPath\": png,\n            \"prompt\": prompt,\n            \"duration\": duration,\n            \"resolution\": item.get(\"resolution\") or \"720p\",\n            \"aspect_ratio\": item.get(\"aspect_ratio\") or \"16:9\",\n            \"model\": item.get(\"model\") or \"bytedance/seedance-2.0-fast\",\n        })\nreturn [{\"json\": {\"slug\": slug, \"jobs\": jobs, \"skipped\": skipped, \"missing_images\": missing}}]\n"
+        "pythonCode": "import json, os\n\nitem = _items[0][\"json\"]\nslug = item[\"slug\"]\nregen = item.get(\"regen_ids\") or []\nshot_filter = set(item.get(\"shot_ids\") or [])\nroot = \"/home/node/files/films/\" + slug\nscript_path = os.path.join(root, \"script.json\")\nif not os.path.exists(script_path):\n    raise RuntimeError(\"project not found: \" + root + \" — run the Script stage first\")\nwith open(script_path) as fh:\n    script = json.load(fh)\nvideos_dir = os.path.join(root, \"videos\")\nos.makedirs(videos_dir, exist_ok=True)\ncamera_phrases = {\n    \"zoom_in\": \"slow dolly push-in toward the subject\",\n    \"zoom_out\": \"slow pull-back revealing more of the scene\",\n    \"pan_left\": \"smooth camera pan to the left\",\n    \"pan_right\": \"smooth camera pan to the right\",\n    \"auto\": \"subtle cinematic camera drift\",\n}\njobs = []\nskipped = 0\nmissing = 0\nfor scene in script.get(\"scenes\", []):\n    for shot in scene.get(\"shots\", []):\n        sid = shot[\"id\"]\n        if shot_filter and sid not in shot_filter:\n            continue\n        png = os.path.join(root, \"shots\", sid + \".png\")\n        if not os.path.exists(png):\n            missing += 1\n            continue\n        if os.path.exists(os.path.join(videos_dir, sid + \".mp4\")) and sid not in regen:\n            skipped += 1\n            continue\n        hint = shot.get(\"duration_hint_sec\") or 5\n        try:\n            raw = max(4, min(8, int(round(float(hint)))))\n        except (TypeError, ValueError):\n            raw = 5\n        valid = (4, 6, 8)  # Veo 3.1 Lite supported durations\n        duration = min(valid, key=lambda v: (abs(v - raw), -v))  # tie-break: prefer longer clip\n        motion = shot.get(\"motion\") if shot.get(\"motion\") in camera_phrases else \"auto\"\n        prompt = (shot.get(\"image_prompt\") or \"cinematic scene\").strip()\n        prompt += \" Camera: \" + camera_phrases[motion] + \".\"\n        prompt += \" Keep character faces, hair, and outfits identical to the input image.\"\n        prompt += \" Cinematic lighting, no text overlays.\"\n        jobs.append({\n            \"shotId\": sid,\n            \"pngPath\": png,\n            \"prompt\": prompt,\n            \"duration\": duration,\n            \"resolution\": item.get(\"resolution\") or \"720p\",\n            \"aspect_ratio\": item.get(\"aspect_ratio\") or \"16:9\",\n            \"model\": item.get(\"model\") or \"google/veo-3.1-lite\",\n        })\nreturn [{\"json\": {\"slug\": slug, \"jobs\": jobs, \"skipped\": skipped, \"missing_images\": missing}}]\n"
       }
     },
     {
@@ -241,7 +241,7 @@
         180
       ],
       "parameters": {
-        "jsCode": "\nconst MAX_ROUNDS = 120;\nconst prev = $runIndex === 0 ? $('Round Start').all()[$itemIndex].json : $('Any Pending?').all()[$itemIndex].json;\nconst resp = $input.item.json ?? {};\nconst status = typeof resp.status === 'string' ? resp.status.toLowerCase() : '';\nlet state = 'pending';\nlet error = prev.error ?? '';\nif (status === 'completed') {\n  state = 'done';\n} else if (['failed', 'cancelled', 'expired'].includes(status)) {\n  state = 'failed';\n  error = String(resp.error ?? ('generation ' + (status || 'failed'))).slice(0, 300);\n} else if (prev.round + 1 >= MAX_ROUNDS) {\n  state = 'failed';\n  error = 'timed out waiting for video generation';\n}\nreturn { json: { slug: prev.slug, model: prev.model, shotId: prev.shotId, jobId: prev.jobId, pollUrl: prev.pollUrl, round: prev.round + 1, state, error } };\n"
+        "jsCode": "// Settle each poll result against the per-job state carried through the loop.\n// Pairing is by jobId (unique per job) — never by item index — so it stays\n// correct when the pending subset shrinks between rounds.\nconst MAX_ROUNDS = 120;\n\n// Prior state per job: Round Start on the first settle, then the previous\n// round's Any Pending? output. runIndex is passed explicitly because\n// $().all() defaults to run 0 (the first round), not the latest.\nconst prevByJobId = {};\nfor (const it of $('Round Start').all()) {\n  if (it.json.jobId) prevByJobId[it.json.jobId] = it.json;\n}\nif ($runIndex > 0) {\n  for (const it of $('Any Pending?').all(0, $runIndex - 1)) {\n    if (it.json.jobId) prevByJobId[it.json.jobId] = it.json;\n  }\n}\n\nconst slugFallback = $('Build Request').first().json.slug;\nconst inputs = $input.all();\nconst out = [];\nfor (let i = 0; i < inputs.length; i++) {\n  const resp = inputs[i].json ?? {};\n  const jobId = (resp.id ?? '').toString();\n  const prev = prevByJobId[jobId];\n  if (!prev) {\n    // Poll result with no matching prior state — treat as failed rather than\n    // silently dropping the shot.\n    out.push({\n      json: {\n        slug: slugFallback,\n        model: '',\n        shotId: 'unknown_' + (jobId || ('index_' + i)),\n        jobId,\n        pollUrl: '',\n        round: 0,\n        state: 'failed',\n        error: String(resp.error?.message ?? resp.error ?? 'no prior state for poll result').slice(0, 300),\n      },\n    });\n    continue;\n  }\n  if (prev.state === 'done' || prev.state === 'failed') {\n    out.push({ json: prev }); // already terminal — do not re-settle\n    continue;\n  }\n  const status = typeof resp.status === 'string' ? resp.status.toLowerCase() : '';\n  let state = 'pending';\n  let error = prev.error ?? '';\n  if (status === 'completed') {\n    state = 'done';\n  } else if (['failed', 'cancelled', 'expired'].includes(status)) {\n    state = 'failed';\n    error = String(resp.error ?? ('generation ' + (status || 'failed'))).slice(0, 300);\n  } else if (prev.round + 1 >= MAX_ROUNDS) {\n    state = 'failed';\n    error = 'timed out waiting for video generation';\n  }\n  out.push({\n    json: {\n      slug: prev.slug,\n      model: prev.model,\n      shotId: prev.shotId,\n      jobId: prev.jobId,\n      pollUrl: prev.pollUrl,\n      round: prev.round + 1,\n      state,\n      error,\n    },\n  });\n}\nreturn out;\n"
       }
     },
     {
@@ -336,7 +336,7 @@
         80
       ],
       "parameters": {
-        "jsCode": "\nconst settled = $('Has Done?').all()[$itemIndex].json;\nreturn { json: {\n  shotId: settled.shotId,\n  model: settled.model,\n  contentUrl: 'https://openrouter.ai/api/v1/videos/' + settled.jobId + '/content?index=0',\n}};\n"
+        "jsCode": "// Per-item: emit a content URL for every settled \"done\" item flowing through\n// Has Done?'s true branch (the IF node passes items through unchanged).\nconst slug = $('Build Request').first().json.slug;\nconst out = [];\nfor (const item of $input.all()) {\n  const settled = item.json;\n  out.push({\n    json: {\n      slug,\n      shotId: settled.shotId,\n      model: settled.model,\n      contentUrl: 'https://openrouter.ai/api/v1/videos/' + settled.jobId + '/content?index=0',\n    },\n  });\n}\nreturn out;\n"
       }
     },
     {
@@ -371,29 +371,18 @@
       }
     },
     {
-      "id": "Code_EncodeB64",
-      "name": "Encode Video B64",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "id": "Node_WriteClip",
+      "name": "Write Clip To Disk",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
       "position": [
         2300,
         80
       ],
       "parameters": {
-        "jsCode": "\nconst srcs = $('Pick Download URL').all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const src = srcs[i] ? srcs[i].json : {};\n  const b64 = items[i].binary?.data?.data ?? '';\n  if (!b64) throw new Error('Empty video download for ' + (src.shotId ?? ('index_' + i)));\n  out.push({ json: { slug: $('Build Request').first().json.slug, model: src.model, shotId: src.shotId, videoB64: b64 } });\n}\nreturn out;\n"
-      }
-    },
-    {
-      "id": "Merge_Results",
-      "name": "Merge Video Results",
-      "type": "n8n-nodes-base.merge",
-      "typeVersion": 3,
-      "position": [
-        2520,
-        180
-      ],
-      "parameters": {
-        "mode": "append",
+        "operation": "write",
+        "fileName": "=/home/node/files/films/{{ $('Build Request').first().json.slug }}/videos/{{ $json.shotId }}.mp4",
+        "dataPropertyName": "data",
         "options": {}
       }
     },
@@ -409,7 +398,7 @@
       "parameters": {
         "mode": "runOnceForAllItems",
         "language": "python",
-        "pythonCode": "\nimport base64, datetime, glob, json, os, subprocess\n\nitems = _items\nif not items:\n    raise RuntimeError(\"no video results received\")\nslug = items[0][\"json\"][\"slug\"]\nmodel = items[0][\"json\"].get(\"model\") or \"google/veo-3.1-lite\"\nroot = \"/home/node/files/films/\" + slug\nvideos_dir = os.path.join(root, \"videos\")\nos.makedirs(videos_dir, exist_ok=True)\nnow = datetime.datetime.utcnow().isoformat() + \"Z\"\nwritten = 0\nfor it in items:\n    d = it[\"json\"]\n    b64 = d.get(\"videoB64\")\n    if not b64:\n        continue\n    with open(os.path.join(videos_dir, d[\"shotId\"] + \".mp4\"), \"wb\") as fh:\n        fh.write(base64.b64decode(b64))\n    written += 1\n\n# Report against ALL script shots so interleaved/failed runs converge to the truth:\n# count = clips actually on disk; failed_ids = shots with no clip that failed this run\n# (submitted but no videoB64) or were failed by a previous run and are still missing.\nwith open(os.path.join(root, \"script.json\")) as fh:\n    script = json.load(fh)\nall_shot_ids = [s[\"id\"] for sc in script.get(\"scenes\", []) for s in sc.get(\"shots\", [])]\nmp4_paths = sorted(glob.glob(os.path.join(videos_dir, \"shot_*.mp4\")))\nexisting_set = {os.path.basename(p)[:-4] for p in mp4_paths}\nfailed_this_run = {it[\"json\"][\"shotId\"] for it in items if not it[\"json\"].get(\"videoB64\")}\npf = os.path.join(root, \"project.json\")\nproj = json.load(open(pf)) if os.path.exists(pf) else {}\nprev_stage = (proj.get(\"stages\") or {}).get(\"videos\") or {}\nprev_failed = set(prev_stage.get(\"failed_ids\") or [])\nstill_missing = set(all_shot_ids) - existing_set\nfailed_ids = sorted(failed_this_run | (prev_failed & still_missing))\n\ndurations = {}\nfor vpath in mp4_paths:\n    sid = os.path.basename(vpath)[:-4]\n    pr = subprocess.run(\n        [\"ffprobe\", \"-v\", \"error\", \"-show_entries\", \"format=duration\", \"-of\", \"csv=p=0\", vpath],\n        capture_output=True, text=True,\n    )\n    if pr.returncode == 0:\n        durations[sid] = round(float(pr.stdout.strip()), 2)\n\nproj[\"updated_at\"] = now\nproj.setdefault(\"stages\", {})[\"videos\"] = {\n    \"status\": \"done\" if existing_set else \"failed\",\n    \"done_at\": now,\n    \"count\": len(existing_set),\n    \"model\": model,\n    \"failed_ids\": failed_ids,\n    \"durations\": durations,\n}\nwith open(pf, \"w\") as fh:\n    json.dump(proj, fh, indent=2, ensure_ascii=False)\nreturn [{\"json\": {\"ok\": True, \"slug\": slug, \"written\": written, \"count\": len(existing_set), \"failed_ids_text\": \", \".join(failed_ids)}}]\n"
+        "pythonCode": "import datetime, glob, json, os, subprocess\n\n# Idempotent: derives the full stage state from the videos directory on every\n# run, so multiple loop waves converging through the merge each leave correct\n# project.json state (the last wave wins with the complete truth).\nMIN_VALID_MP4_BYTES = 1024  # smaller files are stale garbage (e.g. decoded binary-storage markers)\n\nitems = _items\nslug = next((it[\"json\"].get(\"slug\") for it in items if it[\"json\"].get(\"slug\")), \"\")\nif not slug:\n    raise RuntimeError(\"slug missing in video results — cannot locate project\")\nroot = \"/home/node/files/films/\" + slug\nvideos_dir = os.path.join(root, \"videos\")\nwith open(os.path.join(root, \"script.json\")) as fh:\n    script = json.load(fh)\nall_shot_ids = [s[\"id\"] for sc in script.get(\"scenes\", []) for s in sc.get(\"shots\", [])]\n\nnow = datetime.datetime.utcnow().isoformat() + \"Z\"\nmp4_paths = sorted(glob.glob(os.path.join(videos_dir, \"shot_*.mp4\")))\nexisting = set()\ngarbage = set()\nfor p in mp4_paths:\n    sid = os.path.basename(p)[:-4]\n    if sid not in all_shot_ids:\n        continue\n    if os.path.getsize(p) < MIN_VALID_MP4_BYTES:\n        garbage.add(sid)  # unplayable leftover — report as missing so a regen replaces it\n        continue\n    existing.add(sid)\nfailed_ids = sorted((set(all_shot_ids) - existing) | garbage)\n\ndurations = {}\nfor p in mp4_paths:\n    sid = os.path.basename(p)[:-4]\n    if sid not in existing:\n        continue\n    pr = subprocess.run(\n        [\"ffprobe\", \"-v\", \"error\", \"-show_entries\", \"format=duration\", \"-of\", \"csv=p=0\", p],\n        capture_output=True, text=True,\n    )\n    if pr.returncode == 0:\n        durations[sid] = round(float(pr.stdout.strip()), 2)\n\nmodel = next((it[\"json\"].get(\"model\") for it in items if it[\"json\"].get(\"model\")), \"\")\npf = os.path.join(root, \"project.json\")\nproj = json.load(open(pf)) if os.path.exists(pf) else {}\nprev_model = ((proj.get(\"stages\") or {}).get(\"videos\") or {}).get(\"model\") or \"\"\nproj[\"updated_at\"] = now\nproj.setdefault(\"stages\", {})[\"videos\"] = {\n    \"status\": \"done\" if existing else \"failed\",\n    \"done_at\": now,\n    \"count\": len(existing),\n    \"total\": len(all_shot_ids),\n    \"model\": model or prev_model or \"google/veo-3.1-lite\",\n    \"failed_ids\": failed_ids,\n    \"durations\": durations,\n}\nwith open(pf, \"w\") as fh:\n    json.dump(proj, fh, indent=2, ensure_ascii=False)\nreturn [{\"json\": {\"ok\": True, \"slug\": slug, \"written\": len(existing), \"count\": len(existing), \"failed_ids_text\": \", \".join(failed_ids)}}]\n"
       }
     },
     {
@@ -461,6 +450,40 @@
               "type": "string"
             }
           ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "N_Submit_Ok",
+      "name": "Submit OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        870,
+        320
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-submit-ok",
+              "leftValue": "={{ $json.pollUrl }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
         },
         "options": {}
       }
@@ -555,7 +578,7 @@
       "main": [
         [
           {
-            "node": "Poll Job",
+            "node": "Submit OK?",
             "type": "main",
             "index": 0
           }
@@ -624,9 +647,9 @@
         ],
         [
           {
-            "node": "Merge Video Results",
+            "node": "Write Videos",
             "type": "main",
-            "index": 1
+            "index": 0
           }
         ]
       ]
@@ -646,29 +669,7 @@
       "main": [
         [
           {
-            "node": "Encode Video B64",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Encode Video B64": {
-      "main": [
-        [
-          {
-            "node": "Merge Video Results",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Merge Video Results": {
-      "main": [
-        [
-          {
-            "node": "Write Videos",
+            "node": "Write Clip To Disk",
             "type": "main",
             "index": 0
           }
@@ -680,6 +681,35 @@
         [
           {
             "node": "Seedance Ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit OK?": {
+      "main": [
+        [
+          {
+            "node": "Poll Job",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Any Pending?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Clip To Disk": {
+      "main": [
+        [
+          {
+            "node": "Write Videos",
             "type": "main",
             "index": 0
           }
