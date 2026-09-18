@@ -94,9 +94,31 @@ The download button hits `GET /webhook/film-download?slug=<slug>` (`film-downloa
 
 Each next button unlocks only when the previous stage completes; failed stages offer Retry. Shots/voiceover are idempotent (already-generated files are skipped unless `regen_ids` is passed — use curl for selective regeneration).
 
+### In-browser stage review
+
+After each stage completes, its actual output is rendered below the stage row (view-only):
+
+1. **Script** — character cards with their generated anchor portraits (`refs/anchors/char_<id>.jpg`), voice, and visual description, plus a per-scene collapsible screenplay (shot id, image prompt, narration, dialogue with speaker names)
+2. **Shots** — gallery of generated `shots/shot_XXX.png` stills (click for full size); missing images are noted
+3. **Voiceover** — per-shot audio players for `audio/shot_XXX.mp3` with durations; silent shots are labeled instead of given a player
+4. **Assemble** — inline `<video controls>` player of `film.mp4` with size, alongside the download button
+
+These are served by `film-review.workflow.json` ("AI Film 07 — Review & Assets", workflow ID `ax3vTv5EOwKlT0Va`):
+
+- `GET /webhook/film-review?slug=<slug>` — JSON manifest of the whole project (status, stage map, characters, scenes, shots with file-availability flags, durations, silent shots, film info). Returns `status: "not_found"` for unknown slugs.
+- `GET /webhook/film-asset?slug=<slug>&file=<path>` — streams a project file inline (shots PNGs, anchor JPGs, audio MP3s, film.mp4, script.json). `file` must match a strict allowlist (e.g. `shots/shot_001.png`) — anything else is rejected.
+
+### Load existing project by slug
+
+The Pipeline card has a **Load existing project** input: enter a slug and completed stages are restored from the project's `project.json` stage map, with review sections rendered for each — so review survives a page reload. Unknown slugs show an error; nothing is overwritten on the server.
+
 ## Files
 - `user-intention-fixer.workflow.json`: local source of truth for workflow definition.
 - `film-0*.workflow.json`: AI film pipeline (setup → script + character anchors → shots → voiceover → assemble).
 - `film-download.workflow.json`: serves the rendered `film.mp4` for download (`GET /webhook/film-download?slug=...`, workflow ID `MewzwAdmqjhPoRAM`).
+- `film-review.workflow.json`: stage-review manifest + asset proxy (`GET /webhook/film-review`, `GET /webhook/film-asset`, workflow ID `ax3vTv5EOwKlT0Va`).
 - `web/index.html`: project setup web form (see "Film Project Setup UI").
+- `web/config.js`: shared `CONFIG` and `PIPELINE_STAGES` definitions.
+- `web/review.js`: manifest fetch, asset URL helper, per-stage review renderers, load-by-slug.
+- `web/app.js`: form, thumbnails, and pipeline stage runner.
 - `AGENT.md`: authoring rules and API workflow conventions.
