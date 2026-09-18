@@ -166,8 +166,8 @@ function initPipeline(slug) {
   renderPipeline();
 }
 
-function isStageUnlocked(index) {
-  return PIPELINE_STAGES.slice(0, index).every((stage) => pipeline.stages[stage.id].status === "done");
+function isStageUnlocked(stage) {
+  return (stage.requires ?? []).every((id) => pipeline.stages[id] && pipeline.stages[id].status === "done");
 }
 
 function updateStage(stageId, patch) {
@@ -244,7 +244,7 @@ function makeStageRow(stage, index, state) {
 
   row.append(makeStageIcon(state), makeStageBody(stage, state));
 
-  const button = makeStageButton(stage, index, state);
+  const button = makeStageButton(stage, state);
   if (button) row.append(button);
   return row;
 }
@@ -306,7 +306,7 @@ function makeDownloadLink(slug) {
   return link;
 }
 
-function makeStageButton(stage, index, state) {
+function makeStageButton(stage, state) {
   if (state.status === "running") {
     const button = document.createElement("button");
     button.type = "button";
@@ -315,7 +315,7 @@ function makeStageButton(stage, index, state) {
     return button;
   }
   if (state.status === "done") return null;
-  if (state.status === "pending" && !isStageUnlocked(index)) return null;
+  if (state.status === "pending" && !isStageUnlocked(stage)) return null;
 
   const button = document.createElement("button");
   button.type = "button";

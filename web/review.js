@@ -6,6 +6,7 @@
 const STAGE_KEY_MAP = Object.freeze({
   script: "script",
   shots: "images",
+  animate: "videos",
   voice: "voiceover",
   assemble: "assembly",
 });
@@ -13,6 +14,7 @@ const STAGE_KEY_MAP = Object.freeze({
 const REVIEW_RENDERERS = Object.freeze({
   script: renderScriptReview,
   shots: renderShotsReview,
+  animate: renderAnimateReview,
   voice: renderVoiceReview,
   assemble: renderFilmReview,
 });
@@ -279,6 +281,66 @@ function makeShotFigure(shot, slug) {
 
   figure.append(link, caption);
   return figure;
+}
+
+// ---------- animate stage: per-shot video players ----------
+
+function renderAnimateReview(container, manifest, slug) {
+  const shots = manifest.shots || [];
+  if (!shots.length) {
+    appendMuted(container, "No script shots found.");
+    return;
+  }
+
+  const failed = new Set(
+    ((manifest.stages && manifest.stages.videos && manifest.stages.videos.failed_ids) || []),
+  );
+  const list = document.createElement("div");
+  list.className = "review-audio";
+  let animated = 0;
+
+  for (const shot of shots) {
+    if (shot.has_video) {
+      animated += 1;
+      list.append(makeVideoRow(shot.id, slug));
+    } else if (failed.has(shot.id)) {
+      list.append(makeVideoNoteRow(shot.id, "generation failed — re-run Animate to retry"));
+    } else {
+      list.append(makeVideoNoteRow(shot.id, "no clip yet — run Animate, or assembly falls back to image motion"));
+    }
+  }
+  container.append(list);
+  if (!animated) appendMuted(container, "No animated clips yet.");
+}
+
+function makeVideoRow(shotId, slug) {
+  const row = document.createElement("div");
+  row.className = "review-audio-row";
+
+  const label = document.createElement("span");
+  label.className = "shot-label";
+  label.textContent = shotId;
+
+  const video = document.createElement("video");
+  video.controls = true;
+  video.preload = "none";
+  video.src = assetUrl(slug, "videos/" + shotId + ".mp4");
+
+  row.append(label, video);
+  return row;
+}
+
+function makeVideoNoteRow(shotId, note) {
+  const row = document.createElement("div");
+  row.className = "review-audio-row";
+  const label = document.createElement("span");
+  label.className = "shot-label";
+  label.textContent = shotId;
+  const text = document.createElement("span");
+  text.className = "review-silent";
+  text.textContent = note;
+  row.append(label, text);
+  return row;
 }
 
 // ---------- voice stage: per-shot audio players ----------

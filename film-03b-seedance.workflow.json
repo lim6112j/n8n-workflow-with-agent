@@ -1,0 +1,695 @@
+{
+  "name": "AI Film 03B — Seedance Videos",
+  "nodes": [
+    {
+      "id": "Hook_Seedance",
+      "name": "Seedance Hook",
+      "webhookId": "8F4A9E21-6C3D-4B57-8E09-2D71C5F0A934",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -780,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "film-gen-seedance",
+        "responseMode": "lastNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      }
+    },
+    {
+      "id": "Code_BuildRequest",
+      "name": "Build Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const body = $json.body ?? $json;\nconst slug = (body.project_slug ?? '').toString().trim().toLowerCase().replace(/[^a-z0-9-]/g, '');\nif (!slug) throw new Error('project_slug is required in the JSON body.');\nconst regenRaw = (body.regen_ids ?? '').toString();\nconst regenIds = regenRaw.split(/[，,\\s]+/).map((x) => x.trim().toLowerCase()).filter((x) => /^shot_[a-z0-9_]+$/.test(x));\nconst model = (body.video_model ?? '').toString().trim() || 'google/veo-3.1-lite';\nconst resolution = ['480p', '720p'].includes((body.video_resolution ?? '').toString()) ? body.video_resolution.toString() : '720p';\nconst shotIdsRaw = (body.shot_ids ?? '').toString();\nconst shotIds = shotIdsRaw.split(/[,\\s]+/).map((x) => x.trim().toLowerCase()).filter((x) => /^shot_[a-z0-9_]+$/.test(x));\nreturn [{ json: { slug, regen_ids: regenIds, shot_ids: shotIds, model, resolution, aspect_ratio: '16:9' } }];\n"
+      }
+    },
+    {
+      "id": "Code_LoadPlan",
+      "name": "Load Animation Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -340,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "python",
+        "pythonCode": "\nimport json, os\n\nitem = _items[0][\"json\"]\nslug = item[\"slug\"]\nregen = item.get(\"regen_ids\") or []\nshot_filter = set(item.get(\"shot_ids\") or [])\nroot = \"/home/node/files/films/\" + slug\nscript_path = os.path.join(root, \"script.json\")\nif not os.path.exists(script_path):\n    raise RuntimeError(\"project not found: \" + root + \" — run the Script stage first\")\nwith open(script_path) as fh:\n    script = json.load(fh)\nvideos_dir = os.path.join(root, \"videos\")\nos.makedirs(videos_dir, exist_ok=True)\ncamera_phrases = {\n    \"zoom_in\": \"slow dolly push-in toward the subject\",\n    \"zoom_out\": \"slow pull-back revealing more of the scene\",\n    \"pan_left\": \"smooth camera pan to the left\",\n    \"pan_right\": \"smooth camera pan to the right\",\n    \"auto\": \"subtle cinematic camera drift\",\n}\njobs = []\nskipped = 0\nmissing = 0\nfor scene in script.get(\"scenes\", []):\n    for shot in scene.get(\"shots\", []):\n        sid = shot[\"id\"]\n        if shot_filter and sid not in shot_filter:\n            continue\n        png = os.path.join(root, \"shots\", sid + \".png\")\n        if not os.path.exists(png):\n            missing += 1\n            continue\n        if os.path.exists(os.path.join(videos_dir, sid + \".mp4\")) and sid not in regen:\n            skipped += 1\n            continue\n        hint = shot.get(\"duration_hint_sec\") or 5\n        try:\n            raw_dur = max(4, min(8, int(round(float(hint)))))\n        except (TypeError, ValueError):\n            raw = 5\n        else:\n            raw = raw_dur\n        valid = (4, 6, 8)  # Veo 3.1 Lite supported durations\n        duration = max(valid, key=lambda v: (abs(v - raw), -v))  # tie-break: prefer longer clip\n        duration = min(valid, key=lambda v: (abs(v - raw), -v))\n        motion = shot.get(\"motion\") if shot.get(\"motion\") in camera_phrases else \"auto\"\n        prompt = (shot.get(\"image_prompt\") or \"cinematic scene\").strip()\n        prompt += \" Camera: \" + camera_phrases[motion] + \".\"\n        prompt += \" Keep character faces, hair, and outfits identical to the input image.\"\n        prompt += \" Cinematic lighting, no text overlays.\"\n        jobs.append({\n            \"shotId\": sid,\n            \"pngPath\": png,\n            \"prompt\": prompt,\n            \"duration\": duration,\n            \"resolution\": item.get(\"resolution\") or \"720p\",\n            \"aspect_ratio\": item.get(\"aspect_ratio\") or \"16:9\",\n            \"model\": item.get(\"model\") or \"bytedance/seedance-2.0-fast\",\n        })\nreturn [{\"json\": {\"slug\": slug, \"jobs\": jobs, \"skipped\": skipped, \"missing_images\": missing}}]\n"
+      }
+    },
+    {
+      "id": "N_Jobs_Remaining",
+      "name": "Jobs Remaining?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -120,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-jobs-remaining",
+              "leftValue": "={{ $json.jobs.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "Set_ReadyNoJobs",
+      "name": "Seedance Ready (Nothing To Do)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        100,
+        460
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "slug",
+              "name": "slug",
+              "value": "={{ $('Build Request').first().json.slug }}",
+              "type": "string"
+            },
+            {
+              "id": "videosPath",
+              "name": "videosPath",
+              "value": "=/home/node/files/films/{{ $('Build Request').first().json.slug }}/videos",
+              "type": "string"
+            },
+            {
+              "id": "animatedCount",
+              "name": "animatedCount",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "skippedCount",
+              "name": "skippedCount",
+              "value": "={{ $('Load Animation Plan').first().json.skipped }}",
+              "type": "number"
+            },
+            {
+              "id": "failedIds",
+              "name": "failedIds",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "nextStep",
+              "name": "nextStep",
+              "value": "All shots already have Seedance clips (pass regen_ids to redo any). Generate voiceover next, then assemble.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "Split_Jobs",
+      "name": "Split Jobs",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        100,
+        180
+      ],
+      "parameters": {
+        "fieldToSplitOut": "jobs",
+        "options": {}
+      }
+    },
+    {
+      "id": "Code_BuildPayload",
+      "name": "Build Video Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        180
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "python",
+        "pythonCode": "\nimport base64, json, os, subprocess\n\nANIM_WIDTH = 1280\nANIM_HEIGHT = 720\nJPEG_QUALITY = \"4\"\nout = []\nfor it in _items:\n    j = it.get(\"json\", {})\n    inner = j.get(\"item\")\n    job = inner if isinstance(inner, dict) else j\n    png = job.get(\"pngPath\")\n    if not png or not os.path.exists(png):\n        continue\n    tmp_jpg = png[:-4] + \"_anim.jpg\"\n    pr = subprocess.run(\n        [\"ffmpeg\", \"-y\", \"-loglevel\", \"error\", \"-i\", png,\n         \"-vf\", \"scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d\" % (ANIM_WIDTH, ANIM_HEIGHT, ANIM_WIDTH, ANIM_HEIGHT),\n         \"-q:v\", JPEG_QUALITY, tmp_jpg],\n        capture_output=True, text=True)\n    if pr.returncode != 0:\n        raise RuntimeError(\"ffmpeg downscale failed for \" + png + \": \" + (pr.stderr or \"\")[-200:])\n    with open(tmp_jpg, \"rb\") as fh:\n        url = \"data:image/jpeg;base64,\" + base64.b64encode(fh.read()).decode(\"ascii\")\n    os.remove(tmp_jpg)\n    body = {\n        \"model\": job.get(\"model\") or \"bytedance/seedance-2.0-fast\",\n        \"prompt\": job.get(\"prompt\") or \"cinematic scene\",\n        \"aspect_ratio\": job.get(\"aspect_ratio\") or \"16:9\",\n        \"duration\": job.get(\"duration\") or 5,\n        \"resolution\": job.get(\"resolution\") or \"720p\",\n        \"generate_audio\": False,\n        \"frame_images\": [{\"type\": \"image_url\", \"frame_type\": \"first_frame\", \"image_url\": {\"url\": url}}],\n    }\n    out.append({\"json\": {\"shotId\": job.get(\"shotId\"), \"slug\": job.get(\"slug\"), \"model\": job.get(\"model\"), \"body\": body}})\nif not out:\n    raise RuntimeError(\"no valid shot images found for animation\")\nreturn out\n"
+      }
+    },
+    {
+      "id": "Http_Submit",
+      "name": "Submit Video Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "onError": "continueRegularOutput",
+      "position": [
+        540,
+        180
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/videos",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openRouterApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "credentials": {
+        "openRouterApi": {
+          "id": "CrCtPveFpgBQ5Pir",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "id": "Code_RoundStart",
+      "name": "Round Start",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        760,
+        180
+      ],
+      "parameters": {
+        "jsCode": "\nconst metas = $('Build Video Payload').all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json ?? {};\n  const meta = metas[i] ? metas[i].json : {};\n  const slug = meta.slug ?? $('Build Request').first().json.slug;\n  const jobId = (resp.id ?? '').toString();\n  if (!jobId) {\n    const msg = resp.error?.message ?? resp.error ?? 'video job submit failed';\n    out.push({ json: { slug, model: meta.model ?? 'google/veo-3.1-lite', shotId: meta.shotId ?? ('unknown_' + i), jobId: '', pollUrl: '', round: 0, state: 'failed', error: String(msg).slice(0, 300) } });\n    continue;\n  }\n  out.push({ json: { slug, model: meta.model ?? 'google/veo-3.1-lite', shotId: meta.shotId, jobId, pollUrl: 'https://openrouter.ai/api/v1/videos/' + jobId, round: 0, state: 'pending', error: '' } });\n}\nreturn out;\n"
+      }
+    },
+    {
+      "id": "Http_Poll",
+      "name": "Poll Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "onError": "continueRegularOutput",
+      "position": [
+        980,
+        180
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.pollUrl }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openRouterApi",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "openRouterApi": {
+          "id": "CrCtPveFpgBQ5Pir",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "id": "Code_RoundSettle",
+      "name": "Round Settle",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        180
+      ],
+      "parameters": {
+        "jsCode": "\nconst MAX_ROUNDS = 120;\nconst prev = $runIndex === 0 ? $('Round Start').all()[$itemIndex].json : $('Any Pending?').all()[$itemIndex].json;\nconst resp = $input.item.json ?? {};\nconst status = typeof resp.status === 'string' ? resp.status.toLowerCase() : '';\nlet state = 'pending';\nlet error = prev.error ?? '';\nif (status === 'completed') {\n  state = 'done';\n} else if (['failed', 'cancelled', 'expired'].includes(status)) {\n  state = 'failed';\n  error = String(resp.error ?? ('generation ' + (status || 'failed'))).slice(0, 300);\n} else if (prev.round + 1 >= MAX_ROUNDS) {\n  state = 'failed';\n  error = 'timed out waiting for video generation';\n}\nreturn { json: { slug: prev.slug, model: prev.model, shotId: prev.shotId, jobId: prev.jobId, pollUrl: prev.pollUrl, round: prev.round + 1, state, error } };\n"
+      }
+    },
+    {
+      "id": "N_Any_Pending",
+      "name": "Any Pending?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1420,
+        180
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-state-pending",
+              "leftValue": "={{ $json.state }}",
+              "rightValue": "pending",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "Wait_Job",
+      "name": "Wait For Job",
+      "webhookId": "B7E2D409-1A58-4F3C-9D62-04F8E1C7B5A8",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1200,
+        440
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 10,
+        "unit": "seconds"
+      }
+    },
+    {
+      "id": "N_Has_Done",
+      "name": "Has Done?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1640,
+        180
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-state-done",
+              "leftValue": "={{ $json.state }}",
+              "rightValue": "done",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "Code_PickUrl",
+      "name": "Pick Download URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1860,
+        80
+      ],
+      "parameters": {
+        "jsCode": "\nconst settled = $('Has Done?').all()[$itemIndex].json;\nreturn { json: {\n  shotId: settled.shotId,\n  model: settled.model,\n  contentUrl: 'https://openrouter.ai/api/v1/videos/' + settled.jobId + '/content?index=0',\n}};\n"
+      }
+    },
+    {
+      "id": "Http_Download",
+      "name": "Download Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "onError": "continueRegularOutput",
+      "position": [
+        2080,
+        80
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.contentUrl }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openRouterApi",
+        "options": {
+          "timeout": 600000,
+          "response": {
+            "response": {
+              "format": "file"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "openRouterApi": {
+          "id": "CrCtPveFpgBQ5Pir",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "id": "Code_EncodeB64",
+      "name": "Encode Video B64",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2300,
+        80
+      ],
+      "parameters": {
+        "jsCode": "\nconst srcs = $('Pick Download URL').all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const src = srcs[i] ? srcs[i].json : {};\n  const b64 = items[i].binary?.data?.data ?? '';\n  if (!b64) throw new Error('Empty video download for ' + (src.shotId ?? ('index_' + i)));\n  out.push({ json: { slug: $('Build Request').first().json.slug, model: src.model, shotId: src.shotId, videoB64: b64 } });\n}\nreturn out;\n"
+      }
+    },
+    {
+      "id": "Merge_Results",
+      "name": "Merge Video Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        2520,
+        180
+      ],
+      "parameters": {
+        "mode": "append",
+        "options": {}
+      }
+    },
+    {
+      "id": "Code_WriteVideos",
+      "name": "Write Videos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2740,
+        180
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "python",
+        "pythonCode": "\nimport base64, datetime, glob, json, os, subprocess\n\nitems = _items\nif not items:\n    raise RuntimeError(\"no video results received\")\nslug = items[0][\"json\"][\"slug\"]\nmodel = items[0][\"json\"].get(\"model\") or \"google/veo-3.1-lite\"\nroot = \"/home/node/files/films/\" + slug\nvideos_dir = os.path.join(root, \"videos\")\nos.makedirs(videos_dir, exist_ok=True)\nnow = datetime.datetime.utcnow().isoformat() + \"Z\"\nwritten = 0\nfor it in items:\n    d = it[\"json\"]\n    b64 = d.get(\"videoB64\")\n    if not b64:\n        continue\n    with open(os.path.join(videos_dir, d[\"shotId\"] + \".mp4\"), \"wb\") as fh:\n        fh.write(base64.b64decode(b64))\n    written += 1\n\n# Report against ALL script shots so interleaved/failed runs converge to the truth:\n# count = clips actually on disk; failed_ids = shots with no clip that failed this run\n# (submitted but no videoB64) or were failed by a previous run and are still missing.\nwith open(os.path.join(root, \"script.json\")) as fh:\n    script = json.load(fh)\nall_shot_ids = [s[\"id\"] for sc in script.get(\"scenes\", []) for s in sc.get(\"shots\", [])]\nmp4_paths = sorted(glob.glob(os.path.join(videos_dir, \"shot_*.mp4\")))\nexisting_set = {os.path.basename(p)[:-4] for p in mp4_paths}\nfailed_this_run = {it[\"json\"][\"shotId\"] for it in items if not it[\"json\"].get(\"videoB64\")}\npf = os.path.join(root, \"project.json\")\nproj = json.load(open(pf)) if os.path.exists(pf) else {}\nprev_stage = (proj.get(\"stages\") or {}).get(\"videos\") or {}\nprev_failed = set(prev_stage.get(\"failed_ids\") or [])\nstill_missing = set(all_shot_ids) - existing_set\nfailed_ids = sorted(failed_this_run | (prev_failed & still_missing))\n\ndurations = {}\nfor vpath in mp4_paths:\n    sid = os.path.basename(vpath)[:-4]\n    pr = subprocess.run(\n        [\"ffprobe\", \"-v\", \"error\", \"-show_entries\", \"format=duration\", \"-of\", \"csv=p=0\", vpath],\n        capture_output=True, text=True,\n    )\n    if pr.returncode == 0:\n        durations[sid] = round(float(pr.stdout.strip()), 2)\n\nproj[\"updated_at\"] = now\nproj.setdefault(\"stages\", {})[\"videos\"] = {\n    \"status\": \"done\" if existing_set else \"failed\",\n    \"done_at\": now,\n    \"count\": len(existing_set),\n    \"model\": model,\n    \"failed_ids\": failed_ids,\n    \"durations\": durations,\n}\nwith open(pf, \"w\") as fh:\n    json.dump(proj, fh, indent=2, ensure_ascii=False)\nreturn [{\"json\": {\"ok\": True, \"slug\": slug, \"written\": written, \"count\": len(existing_set), \"failed_ids_text\": \", \".join(failed_ids)}}]\n"
+      }
+    },
+    {
+      "id": "Set_Ready",
+      "name": "Seedance Ready",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2960,
+        180
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "slug",
+              "name": "slug",
+              "value": "={{ $('Load Animation Plan').first().json.slug }}",
+              "type": "string"
+            },
+            {
+              "id": "videosPath",
+              "name": "videosPath",
+              "value": "=/home/node/files/films/{{ $('Load Animation Plan').first().json.slug }}/videos",
+              "type": "string"
+            },
+            {
+              "id": "animatedCount",
+              "name": "animatedCount",
+              "value": "={{ $('Write Videos').first().json.written }}",
+              "type": "number"
+            },
+            {
+              "id": "skippedCount",
+              "name": "skippedCount",
+              "value": "={{ $('Load Animation Plan').first().json.skipped }}",
+              "type": "number"
+            },
+            {
+              "id": "failedIds",
+              "name": "failedIds",
+              "value": "={{ $('Write Videos').first().json.failed_ids_text }}",
+              "type": "string"
+            },
+            {
+              "id": "nextStep",
+              "name": "nextStep",
+              "value": "Seedance clips written to videos/. Re-run to fill gaps, then generate voiceover and assemble — the film uses animated clips where available.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Seedance Hook": {
+      "main": [
+        [
+          {
+            "node": "Build Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Request": {
+      "main": [
+        [
+          {
+            "node": "Load Animation Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Animation Plan": {
+      "main": [
+        [
+          {
+            "node": "Jobs Remaining?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Jobs Remaining?": {
+      "main": [
+        [
+          {
+            "node": "Split Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Seedance Ready (Nothing To Do)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Jobs": {
+      "main": [
+        [
+          {
+            "node": "Build Video Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Video Payload": {
+      "main": [
+        [
+          {
+            "node": "Submit Video Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit Video Job": {
+      "main": [
+        [
+          {
+            "node": "Round Start",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Round Start": {
+      "main": [
+        [
+          {
+            "node": "Poll Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll Job": {
+      "main": [
+        [
+          {
+            "node": "Round Settle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Round Settle": {
+      "main": [
+        [
+          {
+            "node": "Any Pending?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any Pending?": {
+      "main": [
+        [
+          {
+            "node": "Wait For Job",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Has Done?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait For Job": {
+      "main": [
+        [
+          {
+            "node": "Poll Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Done?": {
+      "main": [
+        [
+          {
+            "node": "Pick Download URL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge Video Results",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Pick Download URL": {
+      "main": [
+        [
+          {
+            "node": "Download Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Video": {
+      "main": [
+        [
+          {
+            "node": "Encode Video B64",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Encode Video B64": {
+      "main": [
+        [
+          {
+            "node": "Merge Video Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Video Results": {
+      "main": [
+        [
+          {
+            "node": "Write Videos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Videos": {
+      "main": [
+        [
+          {
+            "node": "Seedance Ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": false
+}
