@@ -70,6 +70,13 @@
     padding: 2px 8px; cursor: pointer; font-size: 12px;
   }
   .thumb button:hover { border-color: var(--accent); }
+  .thumb .ref-name {
+    width: 100%; margin-top: 4px; padding: 3px 6px;
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 5px;
+    font-size: 11px;
+  }
+  .thumb .ref-name:focus { outline: none; border-color: var(--accent); }
   .thumb .name {
     font-size: 11px; color: var(--muted);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px;
@@ -215,10 +222,10 @@
     <label for="story" style="margin-top:16px">Story</label>
     <textarea id="story" name="story" placeholder="Describe the story — characters, appearance, setting, what happens…" required></textarea>
     <div class="counter short" id="storyCounter">0 / 20 min</div>
-    <p class="hint">Required, at least 20 characters. The script agent (film-02) writes character visual descriptions from this — the richer the story, the better the shots.</p>
+    <p class="hint">Required, at least 20 characters. The script agent (film-02) writes character visual descriptions from this — the richer the story, the better the shots. You can refer to characters with @name tokens that match a named reference image below.</p>
 
     <label style="margin-top:16px">Reference images</label>
-    <p class="hint">1–6 files, jpg / jpeg / png / webp. <strong>Only the first 3 are used</strong> for shot generation (OpenRouter image API limit) — order them by importance.</p>
+    <p class="hint">1–6 files, jpg / jpeg / png / webp. Optionally give an image a character name (e.g. <code>main_character</code>) — mention <code>@main_character</code> in the story and that exact image becomes that character's face in every shot. <strong>Only the first 3 unnamed images</strong> are used as general style references (OpenRouter image API limit) — order them by importance.</p>
     <div class="dropzone" id="dropzone">
       Click to choose images or drag &amp; drop here
       <input type="file" id="fileInput" accept=".jpg,.jpeg,.png,.webp" multiple hidden>

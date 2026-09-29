@@ -31,13 +31,26 @@ function getExtension(filename) {
   return parts.length > 1 ? parts.pop() : "";
 }
 
+// Optional per-image character name: "@main-character" → "main_character".
+// Underscore form so it matches the character ids the script agent will use.
+function sanitizeRefName(raw) {
+  return (raw ?? "")
+    .toString()
+    .toLowerCase()
+    .replace(/@/g, "")
+    .replace(/[^a-z0-9_]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 40);
+}
+
 function addFiles(fileList) {
   const incoming = Array.from(fileList);
   const accepted = [];
   for (const file of incoming) {
     if (!CONFIG.ALLOWED_EXTENSIONS.includes(getExtension(file.name))) continue;
     if (images.length + accepted.length >= CONFIG.MAX_REFS) break;
-    accepted.push({ id: nextImageId++, file, url: URL.createObjectURL(file) });
+    accepted.push({ id: nextImageId++, file, url: URL.createObjectURL(file), name: "" });
   }
   images = [...images, ...accepted];
   renderThumbs();
@@ -48,6 +61,19 @@ function removeImage(id) {
   if (target) URL.revokeObjectURL(target.url);
   images = images.filter((img) => img.id !== id);
   renderThumbs();
+}
+
+function makeBadgeText(index, name) {
+  if (name) return "@" + name;
+  return index < CONFIG.REFS_USED_IN_SHOTS
+    ? "ref_" + String(index + 1).padStart(2, "0")
+    : "unused in shots";
+}
+
+function setRefName(id, raw, badge, index) {
+  const name = sanitizeRefName(raw);
+  images = images.map((img) => (img.id === id ? { ...img, name } : img));
+  badge.textContent = makeBadgeText(index, name);
 }
 
 function moveImage(id, offset) {
@@ -72,11 +98,16 @@ function renderThumbs() {
     preview.alt = img.file.name;
 
     const badge = document.createElement("div");
-    const isUsed = index < CONFIG.REFS_USED_IN_SHOTS;
-    badge.className = "badge" + (isUsed ? "" : " unused");
-    badge.textContent = isUsed
-      ? "ref_" + String(index + 1).padStart(2, "0")
-      : "unused in shots";
+    badge.className = "badge" + (index < CONFIG.REFS_USED_IN_SHOTS ? "" : " unused");
+    badge.textContent = makeBadgeText(index, img.name);
+
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.className = "ref-name";
+    nameInput.placeholder = "name, e.g. main_character";
+    nameInput.value = img.name;
+    nameInput.title = "Optional character name. Mention @" + (img.name || "name") + " in the story to bind this image to that character.";
+    nameInput.addEventListener("input", () => setRefName(img.id, nameInput.value, badge, index));
 
     const name = document.createElement("div");
     name.className = "name";
@@ -91,7 +122,7 @@ function renderThumbs() {
       makeToolButton("✕", "Remove", () => removeImage(img.id)),
     );
 
-    card.append(preview, badge, tools, name);
+    card.append(preview, badge, tools, nameInput, name);
     els.thumbs.append(card);
   });
 }
@@ -119,6 +150,9 @@ function validate() {
   }
   if (!images.length) errors.push("Please add at least 1 reference image.");
   if (images.length > CONFIG.MAX_REFS) errors.push("Please add at most " + CONFIG.MAX_REFS + " reference images.");
+  const names = images.map((img) => img.name).filter(Boolean);
+  const dupes = names.filter((name, i) => names.indexOf(name) !== i);
+  if (dupes.length) errors.push("Each image name must be unique. Duplicate: " + [...new Set(dupes)].join(", ") + ".");
   return errors;
 }
 
@@ -126,7 +160,10 @@ function buildFormData() {
   const data = new FormData();
   data.append("film_title", els.title.value.trim());
   data.append("story", els.story.value.trim());
-  images.forEach((img, index) => data.append("image_" + (index + 1), img.file, img.file.name));
+  images.forEach((img, index) => {
+    data.append("image_" + (index + 1), img.file, img.file.name);
+    data.append("image_name_" + (index + 1), img.name);
+  });
   return data;
 }
 
